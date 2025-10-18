@@ -55,13 +55,11 @@ export default {
         const code = getOption(interaction, "code")?.toLowerCase() ?? "";
         const langRaw = getOption(interaction, "lang") ?? "en";
         const lang = ["en", "ja"].includes(String(langRaw)) ? String(langRaw) : "en";
-        const hashOpt = getOption(interaction, "hash");
-        const hash = typeof hashOpt === "string" && /\d\.[A-Za-z0-9.-]+/.test(hashOpt) ? hashOpt : null;
-        console.log("deck_request", { code, lang, hash_present: !!hash });
+        console.log("deck_request", { code, lang });
 
         // Validate code: 4 letters a-z
         const isValidCode = /^[a-z]{4}$/i.test(code);
-        if (!hash && !isValidCode) {
+        if (!isValidCode) {
           return json({
             type: 4,
             data: {
@@ -74,7 +72,7 @@ export default {
         // Acknowledge quickly, then do work asynchronously
         const defer = json({ type: 5 });
 
-        ctx.waitUntil(handleDeckLookup(interaction, code, lang, hash));
+        ctx.waitUntil(handleDeckLookup(interaction, code, lang));
         return defer;
       }
 
@@ -102,10 +100,8 @@ function getOption(interaction, name) {
   return found?.value;
 }
 
-async function handleDeckLookup(interaction, code, lang, hashOverride) {
-  const deckUrl = hashOverride
-    ? `https://shadowverse-wb.com/${lang}/deck/detail/?hash=${encodeURIComponent(hashOverride)}`
-    : `https://shadowverse-wb.com/${lang}/deck/build_edit/?battle_format=2&deck_code=${encodeURIComponent(code)}`;
+async function handleDeckLookup(interaction, code, lang) {
+  const deckUrl = `https://shadowverse-wb.com/${lang}/deck/build_edit/?battle_format=2&deck_code=${encodeURIComponent(code)}`;
   let imageUrl = null;
   try {
     const res = await fetch(deckUrl, {
@@ -113,13 +109,8 @@ async function handleDeckLookup(interaction, code, lang, hashOverride) {
       headers: { "user-agent": "Mozilla/5.0 (compatible; svwb-bot/1.0)" },
     });
     const html = await res.text();
-    if (hashOverride) {
-      imageUrl = `https://shadowverse-wb.com/web/Image/deck?hash=${encodeURIComponent(hashOverride)}&lang=${lang}`;
-      console.log("selected_image_url_hash_override", { imageUrl, deckUrl });
-    } else {
-      imageUrl = extractDeckImageUrl(html, lang);
-      console.log("selected_image_url", { imageUrl, deckUrl });
-    }
+    imageUrl = extractDeckImageUrl(html, lang);
+    console.log("selected_image_url", { imageUrl, deckUrl });
   } catch (e) {
     // ignore, fallback below
   }

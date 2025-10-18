@@ -26,12 +26,6 @@ const commands = [
         required: true,
       },
       {
-        name: "hash",
-        description: "Optional full deck hash to force exact image",
-        type: 3,
-        required: false,
-      },
-      {
         name: "lang",
         description: "Language (default: en)",
         type: 3,
