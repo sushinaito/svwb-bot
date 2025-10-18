@@ -16,12 +16,12 @@ const DISCORD_API = "https://discord.com/api/v10";
 const commands = [
   {
     name: "deck",
-    description: "Return Shadowverse WB deck image by 4-letter code",
+    description: "Return Shadowverse WB deck image by 4-character code",
     type: 1,
     options: [
       {
         name: "code",
-        description: "4-letter deck code (e.g., ukge)",
+        description: "4-character deck code (letters/numbers)",
         type: 3,
         required: true,
       },
@@ -73,3 +73,4 @@ main().catch((e) => {
   console.error(e);
   process.exit(1);
 });
+
