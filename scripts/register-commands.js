@@ -1,6 +1,6 @@
 // Register the /deck command (guild-scoped or global) via Discord API v10
 // Env vars required:
-// - DISCORD_TOKEN      (Bot token, starts with "MT..." or similar)
+// - DISCORD_TOKEN      (Bot token)
 // - APPLICATION_ID     (Discord Application ID)
 // - GUILD_ID           (Optional: target guild for faster iteration)
 
@@ -32,7 +32,7 @@ const commands = [
         required: false,
         choices: [
           { name: "English", value: "en" },
-          { name: "日本語", value: "ja" }
+          { name: "日本語", value: "ja" },
         ],
       },
     ],

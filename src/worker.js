@@ -111,6 +111,28 @@ async function handleDeckLookup(interaction, code, lang) {
     const html = await res.text();
     imageUrl = extractDeckImageUrl(html, lang);
     console.log("selected_image_url", { imageUrl, deckUrl });
+
+    // If not found, try the other language page as a fallback
+    if (!imageUrl) {
+      const otherLang = lang === "en" ? "ja" : "en";
+      const otherUrl = `https://shadowverse-wb.com/${otherLang}/deck/build_edit/?battle_format=2&deck_code=${encodeURIComponent(code)}`;
+      try {
+        const res2 = await fetch(otherUrl, {
+          cf: { cacheEverything: true, cacheTtl: 60 * 60 },
+          headers: { "user-agent": "Mozilla/5.0 (compatible; svwb-bot/1.0)" },
+        });
+        const html2 = await res2.text();
+        const imageUrl2 = extractDeckImageUrl(html2, otherLang);
+        if (imageUrl2) {
+          imageUrl = imageUrl2;
+          console.log("retry_other_lang_hit", { imageUrl, tried: otherLang });
+        } else {
+          console.log("retry_other_lang_miss", { tried: otherLang });
+        }
+      } catch (e) {
+        console.log("retry_other_lang_error", { tried: otherLang, message: String(e?.message || e) });
+      }
+    }
   } catch (e) {
     // ignore, fallback below
   }
@@ -272,6 +294,23 @@ function extractDeckImageUrl(html, lang) {
     return url;
   }
 
+  // 1b) Try to parse __NEXT_DATA__ JSON and search for a deck hash string
+  try {
+    const nextDataMatch = decoded.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+    if (nextDataMatch) {
+      const jsonText = nextDataMatch[1];
+      const data = JSON.parse(jsonText);
+      const hash = deepFindHashLikeString(data);
+      if (hash) {
+        const url = `https://shadowverse-wb.com/web/Image/deck?hash=${hash}&lang=${lang}`;
+        console.log("hash_from_next_data", { hash, url });
+        return url;
+      }
+    }
+  } catch (e) {
+    console.log("next_data_parse_error", { message: String(e?.message || e) });
+  }
+
   // 2) Fallback to Open Graph image if present
   const ogMatch = decoded.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i);
   if (ogMatch) {
@@ -281,6 +320,38 @@ function extractDeckImageUrl(html, lang) {
   }
 
   return null;
+}
+
+// Heuristic: recursively search a JSON tree for strings that look like a deck hash
+function deepFindHashLikeString(node) {
+  const seen = new Set();
+  function walk(v) {
+    if (v == null) return null;
+    if (typeof v === "string") {
+      // Hashes look like: "2.6.cmmw.cmmw..." etc.
+      if (/^\d+\.[0-9]+\.[A-Za-z0-9.\-]+$/.test(v) && v.includes(".")) {
+        return v;
+      }
+      return null;
+    }
+    if (typeof v === "object") {
+      if (seen.has(v)) return null;
+      seen.add(v);
+      if (Array.isArray(v)) {
+        for (const item of v) {
+          const hit = walk(item);
+          if (hit) return hit;
+        }
+      } else {
+        for (const k of Object.keys(v)) {
+          const hit = walk(v[k]);
+          if (hit) return hit;
+        }
+      }
+    }
+    return null;
+  }
+  return walk(node);
 }
 
 async function verifyDiscordRequest(body, signature, timestamp, publicKeyHex) {
