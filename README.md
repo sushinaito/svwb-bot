@@ -32,12 +32,12 @@ Configure
    - Omit `GUILD_ID` to register globally (takes up to 1 hour to propagate).
 
 Usage
-- In Discord: `/deck code:<abcd> lang:<en|ja>`
+- In Discord: `/deck code:<abcd|a1b2> lang:<en|ja>`
 - The bot defers, fetches the builder page, tries to discover a share hash or direct deck image, and uploads the image as an attachment. If no share is exposed, it may fall back to a generic image or just post the deck link.
 
 Notes
 - Zero cost: Cloudflare Workers free tier + Discord Interactions (no gateway). No headless browser is used.
 - Basic caching: Cloudflare edge cache hints on the deck page fetch.
 - If image extraction fails (site changes), the bot posts the deck URL as a fallback.
-- Not all 4-letter codes map to a published share. When no share is available, the builder page often doesn’t expose a `hash=...`, so the image may be generic. A future enhancement is to cache known code→hash mappings.
+- Not all 4-character alphanumeric codes map to a published share. When no share is available, the builder page often doesn’t expose a `hash=...`, so the image may be generic. A future enhancement is to cache known code→hash mappings.
 - Troubleshooting endpoint verification: if Discord says "Invalid signature", re-set the secret with your App's Public Key (`wrangler secret put DISCORD_PUBLIC_KEY`), redeploy, and tail logs (`wrangler tail`) to see verify_info lines.

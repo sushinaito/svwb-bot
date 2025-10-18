@@ -57,13 +57,13 @@ export default {
         const lang = ["en", "ja"].includes(String(langRaw)) ? String(langRaw) : "en";
         console.log("deck_request", { code, lang });
 
-        // Validate code: 4 letters a-z
-        const isValidCode = /^[a-z]{4}$/i.test(code);
+        // Validate code: 4 alphanumeric characters
+        const isValidCode = /^[a-z0-9]{4}$/i.test(code);
         if (!isValidCode) {
           return json({
             type: 4,
             data: {
-              content: "Invalid code. Please provide 4 letters (a–z).",
+              content: "Invalid code. Please provide 4 letters/numbers (a–z, 0–9).",
               flags: 64, // ephemeral
             },
           });
