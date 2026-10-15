@@ -60,7 +60,13 @@ export default {
     const response = await env.GATEWAY.getByName('discord').fetch(`https://gateway${path.replace('/admin', '')}`, { method: request.method });
     if (path.endsWith('/status')) {
       const budget = await env.BUDGET.getByName('daily').fetch('https://budget/status').then(r => r.json());
-      return json({ ...await response.json(), model: 'claude-haiku-5-5', budget });
+      let conversationRuntime = { status: 'updating' };
+      try {
+        const probe = await env.CONVERSATIONS.getByName('runtime-status').fetch('https://conversation/capabilities');
+        if (probe.ok) conversationRuntime = { status: 'ok', ...await probe.json() };
+        else await probe.body?.cancel();
+      } catch { /* A previous Durable Object version may still be rolling out. */ }
+      return json({ ...await response.json(), conversationRuntime, model: 'claude-haiku-5-5', budget });
     }
     return response;
   },

@@ -1,5 +1,6 @@
 import { discord, json, missingConfig, sendText } from './api.js';
 import { routeMessage, admitMessage, THREAD_TYPES, isReplyToBot } from './routing.js';
+import { FUN_VERSION } from './fun.js';
 
 // One outbound Gateway connection for this Discord application. Outbound sockets
 // cannot hibernate; the alarm restores the connection after deploys/eviction.
@@ -36,6 +37,8 @@ export class DiscordGateway {
       strategyGuidesSupported: true,
       generalResearchToolsSupported: true,
       catalogBatchingSupported: true,
+      naturalChatActionsVersion: FUN_VERSION,
+      cardRendererConfigured: !!(this.env.FUN && this.env.FUN_API_TOKEN),
       imageInput: { supported: true, maxImages: 2, maxBytesPerImage: 5242880, formats: ['png','jpeg','webp','gif'] },
       chineseOutputGuard: true,
       contextCompaction: { thresholdTokens: Number(this.env.CONTEXT_COMPACT_TOKENS || 80000), idleMinutes: 30 },

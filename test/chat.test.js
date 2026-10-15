@@ -526,13 +526,31 @@ test('existing conversations receive new tools without replacing their session o
   const h = await harness(t); await h.enqueue(input('old')); await h.conversation.alarm();
   delete h.conversation.state.researchToolsVersion;
   delete h.conversation.state.researchPolicyVersion;
+  h.conversation.state.funToolsVersion = 1;
   await h.enqueue(input('next')); await h.conversation.alarm();
   assert.equal(h.calls.filter(c => c.path === '/v1/sessions' && c.method === 'POST').length, 1);
-  const update = h.calls.find(c => c.body?.agent?.tools);
+  const update = h.calls.find(c => c.path === '/v1/sessions/sesn_test' && c.body?.agent?.tools);
   assert.ok(update.body.agent.tools.some(t => t.name === 'read_svwb_source'));
   assert.ok(update.body.agent.tools.some(t => t.name === 'roll_dice'));
+  assert.ok(update.body.agent.tools.some(t => t.name === 'make_custom_card'));
   assert.equal(h.conversation.state.researchToolsVersion, 3);
   assert.ok(h.calls.some(c => c.body?.events?.at(-1)?.type === 'system.message'));
+  assert.ok(h.calls.some(c => c.body?.events?.some(e => e.type === 'system.message' && e.content?.some(b => b.text?.includes('功能與權限更新')))));
+  for (const call of h.calls.filter(c => c.body?.events)) assert.ok(call.body.events.filter(e => e.type === 'system.message').length <= 1);
+});
+
+test('deployed conversation capabilities report both feature sets and renderer configuration without generation', async t => {
+  const h = await harness(t);
+  h.localEnv.FUN = { fetch: async (url, init) => {
+    assert.equal(url, 'https://fun/v1/cards/render'); assert.equal(init.headers.Authorization, 'Bearer configured');
+    return new Response(null, { status: 405 });
+  } }; h.localEnv.FUN_API_TOKEN = 'configured';
+  const response = await h.conversation.fetch(new Request('https://conversation/capabilities'));
+  const status = await response.json();
+  assert.equal(status.funVersion, 2); assert.equal(status.rendererConfigured, true); assert.equal(status.catalogBatching, true);
+  assert.equal(status.rendererAuthenticated, true);
+  for (const name of ['read_svwb_source', 'query_svwb_data', 'roll_dice', 'pick_random_card', 'pick_random_craft', 'make_custom_card']) assert.ok(status.tools.includes(name));
+  assert.equal(h.calls.length, 0); assert.equal(h.conversation.state.queue.length, 0);
 });
 
 test('research exhaustion completes from plain evidence within the remaining allowance and preserves the main conversation', async t => {
