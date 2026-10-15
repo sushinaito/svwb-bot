@@ -90,7 +90,7 @@ test('citation-separated text blocks preserve sentences and deliberate paragraph
   '這套牌會強化守護從者。\n\n接著穩住場面。');
 });
 
-async function harness(t, answers = []) {
+async function harness(t, answers = [], options = {}) {
   const budgetCtx = new FakeContext();
   const budget = new DailyBudget(budgetCtx, env);
   await budgetCtx.ready;
@@ -104,6 +104,7 @@ async function harness(t, answers = []) {
   t.mock.method(globalThis, 'fetch', async (raw, init = {}) => {
     const url = new URL(raw), body = init.body ? JSON.parse(init.body) : undefined;
     calls.push({ path: url.pathname, method: init.method, body });
+    if (url.hostname === 'cdn.discordapp.com') return new Response(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC','base64'), { headers: { 'Content-Type': 'image/png' } });
     if (url.hostname === 'discord.com') {
       if (url.pathname.endsWith('/messages')) replies.push(body.content);
       return Response.json({ id: `reply_${replies.length}` });
@@ -115,6 +116,7 @@ async function harness(t, answers = []) {
       return Response.json({ id: sessionCount === 1 ? 'sesn_test' : `sesn_test_${sessionCount}` });
     }
     if (url.pathname.endsWith('/events') && init.method === 'POST') {
+      if (options.rejectImages && body.events[0].content?.some(b => b.type === 'image')) return new Response(null, { status: 400 });
       const event = { ...body.events[0], id: `user_${sequence}`, processed_at: stamp() };
       events.push(event);
       if (autoAnswer && event.type === 'user.message') {
@@ -154,6 +156,56 @@ test('two conversational turns reuse the pinned agent session and never replay o
   assert.equal(budgetStatus(h.budget.state, env).reservedCents, 0);
   await h.enqueue(input('m2'));
   assert.equal(h.conversation.state.queue.length, 0);
+});
+
+const imageInput = () => ({ images: [{ id: '111', messageId: 'm1', channelId: '456', filename: 'deck.png',
+  mediaType: 'image/png', source: 'upload', url: 'https://cdn.discordapp.com/attachments/456/111/deck.png' }] });
+
+test('image pixels reach the model within the same budget and are never persisted in the queue', async t => {
+  const h = await harness(t); h.setAutoAnswer(false);
+  await h.enqueue(input('image', imageInput())); await h.conversation.alarm();
+  const sends = h.calls.filter(c => c.path.endsWith('/events') && c.method === 'POST');
+  assert.equal(sends[0].body.events[0].content.filter(b => b.type === 'image').length, 1);
+  assert.match(sends[0].body.events[0].content[0].text, /"status":"loaded"/);
+  assert.ok(!JSON.stringify([...h.ctx.data]).includes('iVBORw0KGgo'), 'Do not persist base64 in Durable Object values');
+  h.conversation.state.current.phase = 'sending'; delete h.conversation.state.current.userEventId;
+  await h.conversation.alarm();
+  assert.equal(h.conversation.state.current.phase, 'poll');
+  assert.equal(h.calls.filter(c => c.path.endsWith('/events') && c.method === 'POST').length, 1, 'Reconcile an uncertain image submission without duplication');
+  assert.equal(h.calls.filter(c => c.body?.budget).length, 1);
+});
+
+test('rejected image payload falls back once with an honest failure report and no cap increase', async t => {
+  const h = await harness(t, ['圖片讀取失敗，請重傳。'], { rejectImages: true });
+  await h.enqueue(input('image', imageInput())); await h.conversation.alarm();
+  assert.equal(h.conversation.state.current.phase, 'send');
+  await h.conversation.alarm();
+  assert.equal(h.conversation.state.current, null); assert.equal(h.conversation.state.blocked, undefined);
+  assert.match(h.replies[0], /讀取失敗/);
+  const sends = h.calls.filter(c => c.path.endsWith('/events') && c.method === 'POST');
+  assert.equal(sends.length, 2); assert.equal(sends[1].body.events[0].content.length, 1);
+  assert.match(sends[1].body.events[0].content[0].text, /"status":"unavailable"/);
+  assert.equal(h.calls.filter(c => c.body?.budget).length, 1);
+  assert.equal(h.conversation.state.imageCount, 0);
+});
+
+test('image requests cannot download or generate when the daily budget is exhausted', async t => {
+  const h = await harness(t); h.budget.state.days[jstDay()] = 200;
+  await h.enqueue(input('image', imageInput())); await h.conversation.alarm();
+  assert.ok(!h.calls.some(c => c.path.startsWith('/attachments/') || c.path.startsWith('/v1/sessions')));
+});
+
+test('image-count rollover summarizes first, then sends new pixels only to the successor session', async t => {
+  const h = await harness(t, ['已看過圖片', '摘要：龍族牌組，卡名有不確定的部分。', '收到新圖片']);
+  await h.enqueue(input('old')); await h.conversation.alarm();
+  h.conversation.state.imageCount = 16;
+  await h.enqueue(input('new', imageInput())); await h.conversation.alarm();
+  assert.equal(h.conversation.state.current.phase, 'rotate');
+  const summary = h.calls.filter(c => c.path.endsWith('/events') && c.method === 'POST').at(-1).body.events[0];
+  assert.equal(summary.content.length, 1);
+  await h.conversation.alarm();
+  assert.equal(h.conversation.state.sessionId, 'sesn_test_2'); assert.equal(h.conversation.state.imageCount, 1);
+  assert.equal(h.conversation.state.current, null);
 });
 
 test('foreign search prose is withheld and rewritten once within the original budget', async t => {

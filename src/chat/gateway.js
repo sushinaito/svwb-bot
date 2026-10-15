@@ -32,6 +32,7 @@ export class DiscordGateway {
       botRoleMentionsSupported: true,
       directRepliesSupported: true,
       deckPicturesSupported: true,
+      imageInput: { supported: true, maxImages: 2, maxBytesPerImage: 5242880, formats: ['png','jpeg','webp','gif'] },
       chineseOutputGuard: true,
       contextCompaction: { thresholdTokens: Number(this.env.CONTEXT_COMPACT_TOKENS || 80000), idleMinutes: 30 },
       agentVersion: Number(this.env.CLAUDE_AGENT_VERSION || 1),
@@ -212,7 +213,7 @@ export class DiscordGateway {
   async receiveEdit(update) {
     if (!update.guild_id || !String(this.env.ALLOWED_GUILD_IDS).split(',').map(s => s.trim()).includes(update.guild_id)) return;
     // Embed refreshes also emit updates. Only explicit content edits matter.
-    if (typeof update.content !== 'string' || !update.edited_timestamp || !update.id || !update.channel_id) return;
+    if ((typeof update.content !== 'string' && !Array.isArray(update.attachments)) || !update.edited_timestamp || !update.id || !update.channel_id) return;
     if (this.state.limits.seen?.includes(update.id) || this.state.pending.some(m => m.id === update.id)) return;
     if (update.author?.bot || update.webhook_id) return;
     if (!update.mentions?.some(u => u.id === this.state.botId) && !update.mention_roles?.length && !this.state.threads[update.channel_id] &&
@@ -229,7 +230,7 @@ export class DiscordGateway {
 
   async receive(message) {
     if (!message.guild_id || !String(this.env.ALLOWED_GUILD_IDS).split(',').map(s => s.trim()).includes(message.guild_id)) return;
-    if (message.author?.bot || message.webhook_id || !message.content) return;
+    if (message.author?.bot || message.webhook_id || (!message.content && !message.attachments?.length && message.type !== 19)) return;
     message = await this.normalizeBotRoleMention(message);
     message = await this.resolveReply(message);
     const mentioned = message.mentions?.some(u => u.id === this.state.botId);

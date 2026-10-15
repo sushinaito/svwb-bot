@@ -22,7 +22,21 @@ original `wrangler.toml` to deploy this feature.
 - Adding a mention by editing an unhandled message also starts a reply. Editing
   a message already accepted by the bot does not generate a duplicate response;
   send a new message for corrections to an answered question.
-- Attachment uploads are not sent to Claude in this version. Paste relevant text.
+- Image uploads are sent to Claude as image content, including attachments in the
+  explicitly replied-to message. In normal channels, attach images while mentioning
+  the bot, or reply to her image message. To discuss another person's image, reply
+  to that message and mention her. Active threads also accept image-only messages.
+  Limits: two images per request, 5 MB and 8000 pixels per side per image; PNG,
+  JPEG, WebP and GIF (first frame). Other files and arbitrary pasted image URLs
+  are not loaded. Oversized, expired, deleted or invalid images produce an explicit
+  failure report while usable images and text can still be answered.
+- Only attachment metadata is queued locally. Image bytes are fetched from the
+  Discord attachment CDN immediately before sending to Claude, within the existing
+  turn allowance. Expired links are refreshed from the exact referenced message.
+  Images remain in the Claude conversation for follow-ups; reset deletes its
+  sessions. Summary rollover preserves observations, not original image pixels.
+  Incoming image tokens count toward compaction; a new session is also created
+  before exceeding 16 images to avoid upstream many-image limits.
 - Recommended decks with official Portal hash links include up to two Traditional
   Chinese deck pictures as file attachments. URL previews are suppressed; source
   links stay clickable. Image failures leave the text answer available. The bot
@@ -37,6 +51,10 @@ original `wrangler.toml` to deploy this feature.
   organizer when named. Tournament percentages include unclassified deck slots in
   the denominator. Missing tournament data does not discard the community sample;
   neither dataset claims to measure global ranked-ladder usage.
+- Deck discovery loads current source data without requiring exact phrases such as
+  “latest” or a class name. Current-version recommendations also receive the site's
+  tier list, clearly separated from sample popularity and win-rate claims. A failed
+  optional tier lookup does not discard other valid data.
 - Natural requests such as `@電競魅魔 幫我看看這副牌：y8hf` automatically look up
   up to two four-character deck codes through the official Portal in Traditional
   Chinese. The model receives card counts, costs, base/evolved effects and a source

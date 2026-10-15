@@ -1,6 +1,7 @@
 import { json } from './api.js';
 import { metaContext } from './meta.js';
 import { deckPictures, fetchDeckPicture } from './pictures.js';
+import { imageBlock } from './vision.js';
 export { DiscordGateway } from './gateway.js';
 export { Conversation } from './conversation.js';
 export { DailyBudget } from './budget.js';
@@ -21,13 +22,17 @@ export default {
       const picture = deckPictures({ meta: result }, result.archetypes?.[0]?.name || '')[0];
       let image = { status: 'unavailable' };
       if (picture) {
-        try { const blob = await fetchDeckPicture(picture); image = { status: 'ok', type: blob.type, bytes: blob.size }; }
+        try {
+          const blob = await fetchDeckPicture(picture);
+          const block = imageBlock(new Uint8Array(await blob.arrayBuffer()), blob.type);
+          image = { status: 'ok', type: blob.type, bytes: blob.size, visionEncoding: block.source.type };
+        }
         catch { image = { status: 'unavailable' }; }
       }
       return json({ status: result.status, diagnostic, window: result.window, archetypes: result.archetypes?.map(a => a.name), image,
         overview: { status: overview?.status, scope: overview?.scope, sampledBuilds: overview?.sampledBuilds,
           classCount: overview?.classes?.length, topArchetypes: overview?.archetypes?.slice(0, 3).map(a => ({ name: a.name, sampledBuilds: a.sampledBuilds })),
-          tournament: overview?.tournament } });
+          tournament: overview?.tournament, strength: overview?.strength } });
     }
     const response = await env.GATEWAY.getByName('discord').fetch(`https://gateway${path.replace('/admin', '')}`, { method: request.method });
     if (path.endsWith('/status')) {

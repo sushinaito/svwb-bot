@@ -54,10 +54,11 @@ function overviewFixture(change = {}) {
     archetypes: [{ id: key, name: key, builds: key === 'Royal' ? 30 : key === 'Dragon' ? 20 : 10, pct: 100 }] }));
   const event = { slug: 'latest', name: 'BCL Weekly', org: 'BCL', format: 'rotation', startDate: '2026-10-11', endDate: '2026-10-11', playerCount: 5, deckCount: 10 };
   const fixtures = {
-    '/api/manifest': { files: { 'deck.rotation.14': 'summary.json', archetypes: 'labels.json', tournaments: 'events.json',
+    '/api/manifest': { files: { 'deck.rotation.14': 'summary.json', archetypes: 'labels.json', tournaments: 'events.json', 'tierlist.rotation': 'tiers.json',
       'tournament.latest': 'event.json', ...Object.fromEntries(keys.map(k => [`archdeck.rotation.${k}`, `${k}.json`])) } },
     '/data/summary.json': { window: { from: '2026-10-01', to: '2026-10-14' }, classes: groups },
     '/data/labels.json': { Royal: { 'zh-Hant': '海賊皇家' }, Dragon: { 'zh-Hant': '跳費龍' }, Elf: { 'zh-Hant': '連擊精靈' } },
+    '/data/tiers.json': { format: 'rotation', tiers: { t1: [{ archetype: 'Elf', class: 'Elf' }, { archetype: 'Dragon', class: 'Dragon' }] } },
     '/data/events.json': [{ ...event, slug: 'old', endDate: '2026-08-01' }, event, { ...event, slug: 'future', endDate: '2026-10-30' }],
     '/data/event.json': { tournament: event, archetypes: [{ name: 'Royal', class: 'Royal', count: 3, pct: 999 },
       { name: 'Elf', class: 'Elf', count: 5 }, { name: null, class: null, count: 2 }] },
@@ -120,10 +121,13 @@ test('incomplete class sets and invalid counts cannot masquerade as all-class us
 });
 
 test('cross-class and general meta phrasing route without affecting ordinary deck analysis', async () => {
-  for (const text of ['現在主流是什麼？', '推薦牌組', '最新 meta', '全職業最強牌組', '比較龍族和皇家牌組']) {
+  for (const text of ['現在主流是什麼？', '推薦牌組', '最新 meta', '全職業最強牌組', '比較龍族和皇家牌組',
+    '賽狗如繁螢這版本最適合玩什麼牌組', '這個版本最靠運氣的牌是哪一套牌', '現在玩啥牌', '這版適合玩什麼',
+    '想玩快攻牌組', '有什麼適合新手的牌組', 'what should I play', 'best deck this patch']) {
     const f = overviewFixture();
     const result = await metaContext(text, f.fetcher);
     assert.equal(result?.scope, 'all_classes', text);
+    assert.equal(result.strength.status, 'ok'); assert.equal(result.strength.tiers.t1[0].name, '連擊精靈');
   }
   assert.equal(await metaContext('幫我分析我的牌組 y8hf', () => { throw Error('Should not fetch'); }), null);
 });
