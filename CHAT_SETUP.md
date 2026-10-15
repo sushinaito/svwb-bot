@@ -16,6 +16,9 @@ original `wrangler.toml` to deploy this feature.
   replies, or `@電競魅魔 reset` to delete its Claude history and start fresh.
   Stopping participation allows already queued replies to finish.
 - Bots, webhooks, DMs, other servers, and unrelated channel messages are ignored.
+- Adding a mention by editing an unhandled message also starts a reply. Editing
+  a message already accepted by the bot does not generate a duplicate response;
+  send a new message for corrections to an answered question.
 - Attachment uploads are not sent to Claude in this version. Paste relevant text.
 - Web search/fetch are available. Private saved decks and deck database tools are
   not connected to Claude; the existing slash commands continue to handle them.

@@ -208,6 +208,48 @@ test('public admin endpoints cannot start the bot without the secret', async () 
   assert.equal(response.status, 401);
 });
 
+test('a mention added by a partial edit is accepted once, with normal routing and replay protection', async t => {
+  const ctx = new FakeContext(), delivered = [], requests = [];
+  const localEnv = { ...env, CONVERSATIONS: { getByName: () => ({ fetch: async (url, init) => {
+    delivered.push(JSON.parse(init.body)); return Response.json({ accepted: true });
+  } }) } };
+  const gateway = new DiscordGateway(ctx, localEnv); await ctx.ready;
+  gateway.state.enabled = true; gateway.state.botId = '999';
+  let current = message({ content: '<@999> 最近主教有什麼強牌嗎' });
+  t.mock.method(globalThis, 'fetch', async raw => {
+    const path = new URL(raw).pathname; requests.push(path);
+    return Response.json(path.endsWith('/messages/m1') ? current : { type: 0 });
+  });
+  await gateway.packet({ op: 0, t: 'MESSAGE_CREATE', s: 1, d: message({ content: '最近主教有什麼強牌嗎', mentions: [] }) });
+  assert.equal(delivered.length, 0);
+  const update = { id: 'm1', guild_id: '123', channel_id: '456', content: current.content,
+    edited_timestamp: '2026-10-15T06:08:24Z' };
+  await gateway.packet({ op: 0, t: 'MESSAGE_UPDATE', s: 2, d: update });
+  assert.equal(delivered.length, 1);
+  assert.equal(delivered[0].text, '最近主教有什麼強牌嗎');
+  assert.equal(delivered[0].authorId, '789');
+  const count = requests.length;
+  await gateway.packet({ op: 0, t: 'MESSAGE_UPDATE', s: 3, d: update });
+  assert.equal(delivered.length, 1);
+  assert.equal(requests.length, count);
+});
+
+test('edit handling skips embed-only updates, other guilds and fetched bot messages', async t => {
+  const ctx = new FakeContext(), gateway = new DiscordGateway(ctx, env); await ctx.ready;
+  gateway.state.botId = '999';
+  let requests = 0;
+  t.mock.method(globalThis, 'fetch', async () => {
+    requests++; return Response.json(message({ author: { id: 'bot', bot: true } }));
+  });
+  const update = { id: 'm1', channel_id: '456', guild_id: '123', content: '<@999> Hello', edited_timestamp: '2026-10-15T06:08:24Z' };
+  await gateway.receiveEdit({ ...update, content: undefined });
+  await gateway.receiveEdit({ ...update, guild_id: 'other' });
+  assert.equal(requests, 0);
+  await gateway.receiveEdit(update);
+  assert.equal(requests, 1);
+  assert.equal(gateway.state.pending.length, 0);
+});
+
 test('agent spec pins Haiku 5.5 and only enables web tools', async () => {
   const spec = JSON.parse(await readFile(new URL('../claude/agent.json', import.meta.url), 'utf8'));
   assert.equal(spec.model, 'claude-haiku-5-5');

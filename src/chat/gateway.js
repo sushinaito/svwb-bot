@@ -28,6 +28,7 @@ export class DiscordGateway {
       lastError: this.state.lastError || null, pendingMessages: this.state.pending.length,
       messagesToday: this.state.limits.count || 0, missing: missingConfig(this.env),
       allowedGuildIds: String(this.env.ALLOWED_GUILD_IDS || '').split(',').filter(Boolean),
+      messageEditsSupported: true,
     });
     if (path === '/stop') {
       this.state.enabled = false;
@@ -194,11 +195,29 @@ export class DiscordGateway {
       this.state.failures = 0;
     }
     if (packet.t === 'MESSAGE_CREATE') await this.receive(packet.d);
+    if (packet.t === 'MESSAGE_UPDATE') await this.receiveEdit(packet.d);
     if (packet.t === 'THREAD_DELETE') delete this.state.threads[packet.d.id];
     // Persist the replay cursor only after the message has been durably queued.
     if (this.state.resume) this.state.resume.seq = packet.s;
     await this.save();
     await this.drain();
+  }
+
+  async receiveEdit(update) {
+    if (!update.guild_id || !String(this.env.ALLOWED_GUILD_IDS).split(',').map(s => s.trim()).includes(update.guild_id)) return;
+    // Embed refreshes also emit updates. Only explicit content edits matter.
+    if (typeof update.content !== 'string' || !update.edited_timestamp || !update.id || !update.channel_id) return;
+    if (this.state.limits.seen?.includes(update.id) || this.state.pending.some(m => m.id === update.id)) return;
+    if (update.author?.bot || update.webhook_id) return;
+    if (!update.mentions?.some(u => u.id === this.state.botId) && !this.state.threads[update.channel_id] &&
+        !new RegExp(`<@!?${this.state.botId}>`).test(update.content)) return;
+    // Update payloads can omit author/type/mentions. Fetch the complete current
+    // message and route it through the same guild, author and budget guards.
+    let message;
+    try { message = await discord(this.env, `/channels/${update.channel_id}/messages/${update.id}`); }
+    catch (error) { if ([403, 404].includes(error.status)) return; throw error; }
+    if (message.id !== update.id || message.channel_id !== update.channel_id) return;
+    await this.receive({ ...message, guild_id: update.guild_id });
   }
 
   async receive(message) {
