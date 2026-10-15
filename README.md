@@ -1,5 +1,11 @@
 Shadowverse WB Deck Bot (Cloudflare Workers)
 
+Dice, random cards, and custom cards use a separate `svwb-fun-bot` Worker.
+See [FUN_SETUP.md](FUN_SETUP.md) for commands, the authenticated renderer API,
+and deployment/rollback. Its interaction router forwards existing deck commands
+to the unchanged live deck service. The maker uses the exact WB maker renderer
+and supports both single-card and effect-image layouts.
+
 Natural mention/thread chat with Claude Managed Agents is implemented as a separate
 companion Worker. See [CHAT_SETUP.md](CHAT_SETUP.md) for behavior, deployment, and
 the Haiku 5.5 / $2-per-day configuration. Use `wrangler.chat.local.json` for that

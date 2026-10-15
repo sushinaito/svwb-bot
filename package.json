@@ -10,7 +10,11 @@
     "chat:status": "node scripts/chat-admin.js status",
     "chat:start": "node scripts/chat-admin.js start",
     "chat:stop": "node scripts/chat-admin.js stop",
-    "chat:deploy": "wrangler deploy --config wrangler.chat.local.json"
+    "chat:deploy": "wrangler deploy --config wrangler.chat.local.json",
+    "fun:deploy": "wrangler deploy --config wrangler.fun.json",
+    "fun:activate": "node scripts/activate-fun.js",
+    "fun:smoke": "node scripts/smoke-fun.js",
+    "fun:prepare": "node scripts/prepare-maker.js",
+    "fun:preview": "node scripts/preview-maker.js"
   }
 }
-

@@ -8,3 +8,6 @@ dist/
 .chat-secrets.json
 wrangler.chat.local.json
 *.log
+.fun-secrets.json
+vendor/wbmaker/
+assets/wbmaker/
