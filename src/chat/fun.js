@@ -62,7 +62,7 @@ export async function executeFunTool(env, event, job, state, save, fetcher = fet
       else if (event.name === 'pick_random_card') payload = await randomCard(args, fetcher);
       else if (event.name === 'make_custom_card') {
         const previous = state.lastFunCard;
-        if (args.reuse_previous && (!previous || previous.authorId !== job.input.authorId)) throw Error('找不到你先前製作的卡片，請提供卡片內容。');
+        if (args.reuse_previous && (!previous || previous.authorId !== job.input.authorId && !job.input.sharedReply)) throw Error('找不到你先前製作的卡片，請提供卡片內容。');
         const { reuse_previous, artwork_index, clear_artwork, card_slot = 1, ...fields } = args;
         for (const key of ['effect', 'evolved', 'superEvolved']) if (typeof fields[key] === 'string') fields[key] = fields[key].replace(/\\r\\n|\\n/g, '\n');
         const card = validateCard({ ...(reuse_previous ? previous.card : {}), ...fields });

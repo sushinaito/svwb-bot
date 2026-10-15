@@ -25,11 +25,20 @@ export async function api(url, init, service, fetcher = fetch) {
 export async function discord(env, path, method = 'GET', body, fetcher) {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await api(`https://discord.com/api/v10${path}`, {
+      const result = await api(`https://discord.com/api/v10${path}`, {
         method,
         headers: { Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`, ...(body instanceof FormData ? {} : { 'Content-Type': 'application/json' }) },
         body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
       }, 'Discord', fetcher);
+      const route=env.REPLY_CONTEXT,match=path.match(/^\/channels\/([^/]+)\/messages(?:\/[^/]+)?$/);
+      if(route&&env.GATEWAY&&['POST','PATCH'].includes(method)&&match?.[1]===route.channelId&&result?.id){
+        const saved=await env.GATEWAY.getByName('discord').fetch('https://gateway/register-reply',{
+          method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...route,messageId:result.id}),
+        });
+        if(!saved.ok)throw Error('Reply context registration failed');
+        await saved.body?.cancel();
+      }
+      return result;
     } catch (error) {
       // A 429 explicitly rejects the request, so retrying this individual chunk
       // is safe. Do not restart a long multi-message reply from its first chunk.

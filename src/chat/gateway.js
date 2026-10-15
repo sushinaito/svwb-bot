@@ -1,5 +1,5 @@
 import { discord, json, missingConfig, sendText } from './api.js';
-import { routeMessage, admitMessage, THREAD_TYPES, isReplyToBot } from './routing.js';
+import { routeMessage, admitMessage, THREAD_TYPES, isReplyToBot, referencedMessage } from './routing.js';
 import { FUN_VERSION } from './fun.js';
 
 // One outbound Gateway connection for this Discord application. Outbound sockets
@@ -14,6 +14,7 @@ export class DiscordGateway {
     this.connecting = false;
     this.heartbeatTimer = null;
     this.latestSequence = null;
+    this.fetchedReplyMessages=new WeakSet();
     ctx.blockConcurrencyWhile(async () => {
       this.state = await ctx.storage.get('gateway') || { enabled: false, threads: {}, pending: [], limits: {} };
     });
@@ -21,8 +22,58 @@ export class DiscordGateway {
 
   save() { return this.ctx.storage.put('gateway', this.state); }
 
+  rememberReply(route){
+    const {guildId,channelId,messageId,key,ownerId}=route;
+    if(!String(this.env.ALLOWED_GUILD_IDS).split(',').map(s=>s.trim()).includes(guildId)||typeof key!=='string'||
+      !key.startsWith(`${guildId}:${channelId}:`)||key!==`${guildId}:${channelId}:${ownerId}`||
+      !messageId||String(messageId).length>100)return false;
+    this.state.replyRoutes||={};
+    const id=`${guildId}:${channelId}:${messageId}`,previous=this.state.replyRoutes[id];
+    if(previous&&previous.key!==key)return false;
+    this.state.replyRoutes[id]={key,ownerId};
+    const keys=Object.keys(this.state.replyRoutes);
+    for(const old of keys.slice(0,Math.max(0,keys.length-2000)))delete this.state.replyRoutes[old];
+    return true;
+  }
+
+  async inheritedReply(message){
+    let target=referencedMessage(message);const seen=new Set();
+    // Existing bot replies predate the registry. Follow validated same-channel
+    // Discord reply links to their original accepted request, never transcripts.
+    for(let depth=0;target&&depth<12;depth++){
+      if(seen.has(target.id))break;seen.add(target.id);
+      if(target.channel_id&&target.channel_id!==message.channel_id||target.guild_id&&target.guild_id!==message.guild_id||target.webhook_id)break;
+      const id=`${message.guild_id}:${message.channel_id}:${target.id}`;
+      const known=this.state.replyRoutes?.[id];
+      if(known)return known;
+      const current={...target,guild_id:message.guild_id,channel_id:message.channel_id};
+      if(target.author?.id!==this.state.botId){
+        const resolved=await this.resolveReply(current);
+        if(isReplyToBot(resolved,this.state.botId)){target=referencedMessage(resolved);continue;}
+        if(!target.author?.id||target.author.bot)break;
+        return {key:`${message.guild_id}:${message.channel_id}:${target.author.id}`,ownerId:target.author.id};
+      }
+      let original=current;
+      if(!current.message_reference&&!this.fetchedReplyMessages.has(target)){
+        try{
+          original=await discord(this.env,`/channels/${message.channel_id}/messages/${target.id}`);
+          if(original.id!==target.id||original.channel_id!==message.channel_id||original.author?.id!==this.state.botId||original.webhook_id)break;
+          original={...original,guild_id:message.guild_id};
+        }catch(error){if([403,404].includes(error.status))break;throw error;}
+      }
+      target=referencedMessage(await this.resolveReply(original));
+    }
+    return null;
+  }
+
   async fetch(request) {
     const path = new URL(request.url).pathname;
+    if(path==='/register-reply'){
+      if(request.method!=='POST')return json({error:'Method not allowed'},405);
+      const accepted=this.rememberReply(await request.json());
+      if(accepted)await this.save();
+      return json({accepted},accepted?200:400);
+    }
     if (path === '/status') return json({
       enabled: this.state.enabled, connected: this.ready,
       botId: this.state.botId || null, lastReadyAt: this.state.lastReadyAt || null,
@@ -32,6 +83,7 @@ export class DiscordGateway {
       messageEditsSupported: true,
       botRoleMentionsSupported: true,
       directRepliesSupported: true,
+      sharedReplyContextVersion:1,
       deckPicturesSupported: true,
       officialCardLookupSupported: true,
       strategyGuidesSupported: true,
@@ -247,6 +299,14 @@ export class DiscordGateway {
     const channel = this.state.threads[message.channel_id] ? { type: 11 } : await discord(this.env, `/channels/${message.channel_id}`);
     const input = routeMessage(message, this.state.botId, channel, this.state.threads, this.env);
     if (!input) return;
+    if(input.repliedToBot&&!input.thread){
+      const inherited=await this.inheritedReply(message);
+      if(inherited){
+        input.key=inherited.key;input.conversationOwnerId=inherited.ownerId;input.sharedReply=true;
+        this.rememberReply({guildId:input.guildId,channelId:input.channelId,messageId:input.replyContext.messageId,...inherited});
+      }
+      input.replyContext.fullConversation=!!inherited;
+    }
     if (this.state.pending.some(m => m.id === input.id)) return;
     if (input.command === 'stop' && input.thread) {
       const owner = this.state.threads[input.channelId]?.owner;
@@ -272,6 +332,8 @@ export class DiscordGateway {
       this.state.threads[input.channelId] = { owner: existing?.owner || input.authorId, expires: Date.now() + Number(this.env.THREAD_IDLE_HOURS || 24) * 3600000 };
     }
     this.state.limits = limits;
+    if(!input.thread)this.rememberReply({guildId:input.guildId,channelId:input.channelId,messageId:input.id,
+      key:input.key,ownerId:input.conversationOwnerId||input.authorId});
     this.state.pending.push(input);
     await this.save();
   }
@@ -311,6 +373,7 @@ export class DiscordGateway {
         (ref.guild_id && ref.guild_id !== message.guild_id) || message.referenced_message !== undefined) return message;
     try {
       const target = await discord(this.env, `/channels/${message.channel_id}/messages/${ref.message_id}`);
+      if(target&&typeof target==='object')this.fetchedReplyMessages.add(target);
       return { ...message, referenced_message: target };
     } catch (error) {
       if ([403, 404].includes(error.status)) return message;

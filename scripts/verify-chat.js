@@ -12,6 +12,7 @@ for (let attempt = 0; attempt < 16; attempt++) {
   const check = { enabled: status.enabled, connected: status.connected, agentVersion: status.agentVersion,
     gatewayFunVersion: status.naturalChatActionsVersion || null, conversationFunVersion: runtime.funVersion || null,
     catalogBatching: !!(status.catalogBatchingSupported && runtime.catalogBatching),
+    sharedReplyContextVersion:status.sharedReplyContextVersion===1&&runtime.sharedReplyContextVersion===1?1:0,
     cardDatabase: runtime.cardDatabase, progressReplyVersion: runtime.progressReplyVersion,
     deckDatabase: runtime.deckDatabase, deckCacheVersion: runtime.deckCacheVersion,cardCompletionVersion:runtime.cardCompletionVersion,
     rendererAuthenticated: !!(status.cardRendererConfigured && runtime.rendererAuthenticated),
@@ -22,7 +23,7 @@ for (let attempt = 0; attempt < 16; attempt++) {
   if (check.enabled && check.connected && check.agentVersion === Number(config.vars.CLAUDE_AGENT_VERSION) &&
       check.gatewayFunVersion === FUN_VERSION && check.conversationFunVersion === FUN_VERSION &&
       check.cardDatabase?.available && check.progressReplyVersion === 2 && check.deckDatabase?.available && check.deckCacheVersion === 2 && check.deckDatabase.storage === 'cloud_durable_object' &&
-      check.cardCompletionVersion===1 && check.catalogBatching && check.rendererAuthenticated && !check.missingTools.length && !check.error) {
+      check.sharedReplyContextVersion===1 && check.cardCompletionVersion===1 && check.catalogBatching && check.rendererAuthenticated && !check.missingTools.length && !check.error) {
     console.log('Verified: both research and natural-chat actions are live, with authenticated card rendering.');
     process.exit(0);
   }

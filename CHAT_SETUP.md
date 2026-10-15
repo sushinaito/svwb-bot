@@ -8,10 +8,15 @@ original `wrangler.toml` to deploy this feature.
 ## Behavior
 
 - In 納薩利克地下大造咖 and backup, mention the bot in a channel to chat. Each person's
-  channel conversation has separate memory, although replies remain visible there.
+  fresh channel mentions use that person's conversation root.
 - Discord's Reply action on one of her messages also works without mentioning her,
-  even with the reply notification turned off. The quoted bot message is included
-  as context; another person's separate conversation history is not imported.
+  even with the reply notification turned off. A reply joins the original ongoing
+  conversation, including its accepted history and summaries, even when the new
+  speaker is someone else. Further replies follow that same context. Speaker
+  identities remain separate, and the participant's unrelated personal root is
+  not merged. Only the original conversation starter can reset shared history.
+  Shared replies can reuse the conversation's previous custom-card design/artwork
+  to create a follow-up card; earlier posted images are not overwritten.
 - Mention the bot once inside a thread. Everyone in that thread can then chat
   without mentioning it again. The thread shares one conversation history.
 - Thread participation expires after 24 hours without an accepted message.
@@ -134,11 +139,22 @@ include source links. Necessary proper names may remain in their original langua
 
 ## Operations
 
-Conversation context is isolated by guild/channel/user in normal channels, where
-each message needs a bot mention. An opted-in thread shares its conversation with
+Fresh mentions use guild/channel/user roots in normal channels. Replies to bot
+messages join the originating root across speakers. Each accepted request and
+bot text chunk, progress edit, card/deck image is associated with its root in a
+durable bounded registry (2,000 entries). Older bot replies can recover the root
+through up to 12 validated same-channel Discord reply links. If an older untracked
+standalone message has no recoverable link, only its quote is available; the bot
+does not pretend it recovered a full conversation. A reply uses the ongoing
+conversation's current history, not a historical snapshot at that message.
+An opted-in thread shares its conversation with
 participants and accepts follow-ups without mentions for 24 hours since activity.
 Only messages accepted after opt-in enter context; the bot does not backfill the
 channel's history or read unrelated untagged chatter into its normal conversations.
+Validate with `node --conditions=card-cache --env-file=.env.txt scripts/smoke-shared-replies.js`:
+three synthetic participants share one real managed-agent session and recall the
+same public game-discussion label, while a fresh mention remains separate. All
+Discord sends are intercepted. Registry writes are internal service calls only.
 
 Before the next message, the bot summarizes and starts a successor session when
 the latest model-request context plus incoming data approaches 80,000 tokens, or

@@ -512,6 +512,18 @@ test('only conversation starter can clear shared thread history', async t => {
   assert.ok(h.calls.some(c => c.method === 'DELETE'));
 });
 
+test('a new speaker joining a reply reuses the original session and cannot reset its history',async t=>{
+ const h=await harness(t,['原作者的答案','接續原話題的答案']);
+ await h.enqueue(input('a'));await h.conversation.alarm();
+ await h.enqueue(input('b',{authorId:'person-b',authorName:'Second',sharedReply:true,conversationOwnerId:'789'}));await h.conversation.alarm();
+ assert.equal(h.calls.filter(c=>c.path==='/v1/sessions'&&c.method==='POST').length,1);
+ const users=h.calls.flatMap(c=>c.body?.events||[]).filter(e=>e.type==='user.message');
+ assert.ok(users.at(-1).content[0].text.includes('"id":"person-b"'));
+ assert.equal(h.conversation.state.ownerId,'789');
+ await h.enqueue(input('b-reset',{authorId:'person-b',sharedReply:true,conversationOwnerId:'789',command:'reset'}));
+ assert.match(h.replies.at(-1),/只有開啟/);assert.equal(h.conversation.state.sessionId,'sesn_test');
+});
+
 test('Gateway heartbeat/resume uses the persisted sequence', async () => {
   const ctx = new FakeContext();
   const gateway = new DiscordGateway(ctx, env); await ctx.ready;

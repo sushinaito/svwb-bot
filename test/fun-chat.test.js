@@ -75,6 +75,9 @@ test('custom card edits preserve prior user artwork and fields; other authors ca
   assert.equal(edit.renders[0].artwork, h.renders[0].artwork);
   const other = harness('make_custom_card', { reuse_previous: true, cost: 9 }, { state: h.state, message: { authorId: 'other' } });
   assert.equal((await other.run()).status, 'unavailable'); assert.equal(other.posts.length, 0);
+  const joined = harness('make_custom_card', { reuse_previous: true, cost: 5 }, {state:h.state,message:{authorId:'other',sharedReply:true}});
+  assert.equal((await joined.run()).status,'ok');assert.equal(joined.renders[0].name,'測試龍');
+  assert.equal(joined.renders[0].artwork,h.renders[0].artwork);
 });
 test('invalid fields, foreign guilds, unavailable images and rejected renders cannot claim success', async () => {
   for (const [name, args, options] of [
