@@ -86,7 +86,7 @@ export async function sendText(env, channelId, text, nonceSeed, replyTo, editFir
     if (i === 0 && editFirstMessageId) {
       try {
         messages.push(await discord(env, `/channels/${channelId}/messages/${editFirstMessageId}`, 'PATCH', {
-          content: chunks[i], allowed_mentions: { parse: [], replied_user: false }, flags: 4,
+          content: chunks[i], allowed_mentions: { parse: [], replied_user: false },
         }));
         continue;
       } catch (error) { if (error.status !== 404) throw error; }

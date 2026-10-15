@@ -31,7 +31,7 @@ export function completionEvidence(input, events, { completedAnswer } = {}) {
     try { return JSON.parse(messageText(e.content)); } catch { return null; }
   }).filter(r => r?.status === 'ok');
   const results = [...new Map(rawResults.map((r, i) => [r.source ? r.source +
-    (Number.isInteger(r.total) && Array.isArray(r.cards) ? JSON.stringify([r.filters,r.query,r.search_in,r.view,r.offset]) : '') : `result-${i}`, r])).values()];
+    (Number.isInteger(r.total) && (Array.isArray(r.cards) || Array.isArray(r.decks)) ? JSON.stringify([r.filters,r.query,r.search_in,r.view,r.offset]) : '') : `result-${i}`, r])).values()];
   for (const r of results.filter(r => r.deckUrl && r.verification === 'official')) add(r, 18000);
   // Complete card lists have first claim on the evidence space.
   for (const r of results.filter(r => Number.isInteger(r.total) && Array.isArray(r.cards))) {

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { collectImages, validAttachmentUrl, imageBlock, loadImages, MAX_IMAGE_BYTES } from '../src/chat/vision.js';
+import { collectImages, validAttachmentUrl, imageBlock, loadImages, loadArtwork, MAX_IMAGE_BYTES } from '../src/chat/vision.js';
 import { routeMessage } from '../src/chat/routing.js';
 import { DiscordGateway } from '../src/chat/gateway.js';
 import { FakeContext, env, message } from './helpers.js';
@@ -10,6 +10,20 @@ const attachment = (id = '111', extra = {}) => ({ id, filename: 'deck.png', cont
   url: `https://cdn.discordapp.com/attachments/456/${id}/deck.png?ex=abc&hm=secret`, ...extra });
 const descriptor = collectImages(message({ attachments: [attachment()] })).images[0];
 const pngResponse = () => new Response(pngBytes(), { headers: { 'Content-Type': 'image/png' } });
+
+test('WebP artwork uses Discord PNG conversion and retains conversion on signed URL refresh', async () => {
+  const requests=[];
+  const result=await loadArtwork(env,{...descriptor,mediaType:'image/webp'},async(raw,options)=>{
+    const u=new URL(raw);requests.push(u);
+    if(u.hostname==='discord.com')return Response.json({id:'m1',channel_id:'456',attachments:[attachment('111',{url:attachment().url+'&fresh=1'})]});
+    assert.equal(u.hostname,'media.discordapp.net');assert.equal(u.searchParams.get('format'),'png');
+    assert.equal(options.headers,undefined);assert.equal(options.redirect,'manual');
+    return u.searchParams.has('fresh')?pngResponse():new Response(null,{status:403});
+  });
+  assert.match(result,/^data:image\/png;base64,/);assert.equal(requests.length,3);
+  const webp=new Uint8Array(30);webp.set(Buffer.from('RIFF'));webp.set(Buffer.from('WEBPVP8X'),8);
+  await assert.rejects(loadArtwork(env,{...descriptor,mediaType:'image/webp'},async()=>new Response(webp,{headers:{'Content-Type':'image/webp'}})),/轉換失敗/);
+});
 
 test('attachments work with a bare mention, image-only thread, or reply to a bot picture', () => {
   const upload = message({ content: '<@999>', attachments: [attachment()] });

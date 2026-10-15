@@ -81,10 +81,16 @@ export function imageBlock(bytes, mediaType) {
   return { type: 'image', source: { type: 'base64', media_type: mediaType, data: btoa(binary) } };
 }
 
-async function download(env, image, fetcher) {
+async function download(env, image, fetcher, asPng = false) {
   let url = image.url;
   if (!validAttachmentUrl(url, image.channelId, image.id)) throw Error('圖片連結無效，請重新上傳。');
-  let response = await fetcher(url, { redirect: 'manual', signal: AbortSignal.timeout(15000) });
+  const requestUrl = raw => {
+    if (!asPng) return raw;
+    const proxy = new URL(raw); proxy.hostname = 'media.discordapp.net';
+    proxy.searchParams.set('format', 'png');
+    return proxy.href;
+  };
+  let response = await fetcher(requestUrl(url), { redirect: 'manual', signal: AbortSignal.timeout(15000) });
   if ([403,404].includes(response.status)) {
     await response.body?.cancel();
     // Re-fetch only the explicitly referenced message to refresh its signed URL.
@@ -92,7 +98,7 @@ async function download(env, image, fetcher) {
     if (current.id !== image.messageId || current.channel_id !== image.channelId) throw Error('圖片訊息已無法讀取。');
     url = current.attachments?.find(a => a.id === image.id)?.url;
     if (!validAttachmentUrl(url, image.channelId, image.id)) throw Error('圖片已刪除或無法讀取，請重新上傳。');
-    response = await fetcher(url, { redirect: 'manual', signal: AbortSignal.timeout(15000) });
+    response = await fetcher(requestUrl(url), { redirect: 'manual', signal: AbortSignal.timeout(15000) });
   }
   const type = response.headers.get('content-type')?.split(';')[0].toLowerCase();
   if (!response.ok || !TYPES.has(type) || Number(response.headers.get('content-length')) > MAX_IMAGE_BYTES || !response.body) {
@@ -111,6 +117,15 @@ async function download(env, image, fetcher) {
   const bytes = new Uint8Array(length); let p = 0;
   for (const part of parts) { bytes.set(part,p); p += part.length; }
   return imageBlock(bytes, type);
+}
+
+// The card renderer decodes PNG/JPEG. Discord's attachment proxy converts WebP
+// on the same trusted host, retaining the exact attachment ID and signed URL.
+export async function loadArtwork(env, image, fetcher = fetch) {
+  let block = await download(env, image, fetcher, image.mediaType === 'image/webp');
+  if (block.source.media_type === 'image/webp') block = await download(env, image, fetcher, true);
+  if (!['image/png', 'image/jpeg'].includes(block.source.media_type)) throw Error('立繪轉換失敗；未送出空白卡，請重新上傳 PNG/JPEG。');
+  return `data:${block.source.media_type};base64,${block.source.data}`;
 }
 
 export async function loadImages(env, input, fetcher = fetch) {

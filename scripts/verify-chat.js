@@ -13,6 +13,7 @@ for (let attempt = 0; attempt < 16; attempt++) {
     gatewayFunVersion: status.naturalChatActionsVersion || null, conversationFunVersion: runtime.funVersion || null,
     catalogBatching: !!(status.catalogBatchingSupported && runtime.catalogBatching),
     cardDatabase: runtime.cardDatabase, progressReplyVersion: runtime.progressReplyVersion,
+    deckDatabase: runtime.deckDatabase, deckCacheVersion: runtime.deckCacheVersion,
     rendererAuthenticated: !!(status.cardRendererConfigured && runtime.rendererAuthenticated),
     missingTools: expected.filter(name => !runtime.tools?.includes(name)), error: status.lastError || null };
   const serialized = JSON.stringify(check);
@@ -20,7 +21,7 @@ for (let attempt = 0; attempt < 16; attempt++) {
   previous = serialized;
   if (check.enabled && check.connected && check.agentVersion === Number(config.vars.CLAUDE_AGENT_VERSION) &&
       check.gatewayFunVersion === FUN_VERSION && check.conversationFunVersion === FUN_VERSION &&
-      check.cardDatabase?.available && check.progressReplyVersion === 1 &&
+      check.cardDatabase?.available && check.progressReplyVersion === 2 && check.deckDatabase?.available && check.deckCacheVersion === 1 &&
       check.catalogBatching && check.rendererAuthenticated && !check.missingTools.length && !check.error) {
     console.log('Verified: both research and natural-chat actions are live, with authenticated card rendering.');
     process.exit(0);

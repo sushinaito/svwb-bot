@@ -60,7 +60,7 @@
     {
       "type": "custom",
       "name": "query_svwb_data",
-      "description": "Search the private official Traditional Chinese card snapshot first, with no network. catalog query accepts literal name/effect keywords (space-separated AND), plus filters and pagination. cards accepts names or IDs/official URLs, including related tokens. Snapshot results include fetchedAt; use fresh=true only when checking new cards, balance updates or current format eligibility. Live filtering does not support free-text effect search: omit query for fresh catalog requests. Read official SVWB card data and public deck/meta data. Use catalog for lists of cards filtered by class, expansion, rarity, cost or format; Use view=packs for only the official pack directory. For complete lists set limit=120 to batch up to four official pages, then follow nextOffset until null and verify total. Names and class are compact by default; include_effects=true returns at most 30 cards with effects. Do not search each card. Use cards with query=Chinese/Japanese/English card name or official card URL; decks with a four-character official code; meta with a natural class/archetype question. Snapshot eligibility is as of fetchedAt, not a future announcement: combine it with sourced format rules and dates for future changes. Unmatched indexes do not prove nonexistence. Use terminology for the bundled official Chinese/English/Japanese glossary (no network). query can contain one or more terms; omit query to browse, using offset/limit and nextOffset. view=terms returns compact name mappings; view=definitions also returns saved official meanings. Use known cached names without re-fetching web pages; only missing/new terms need official research. Use resource=packs for the bundled historical pack timeline: Chinese/Japanese/English names, official IDs, ordinal, full release dates with year and per-field provenance. Empty query lists all; query can be a name, ID, year or 第4彈. This snapshot cannot establish that a future release has or has not been announced; check current official news for that.",
+      "description": "Search the private official Traditional Chinese card snapshot first, with no network. catalog query accepts literal name/effect keywords (space-separated AND), plus filters and pagination. cards accepts names or IDs/official URLs, including related tokens. Snapshot results include fetchedAt; use fresh=true only when checking new cards, balance updates or current format eligibility. Live filtering does not support free-text effect search: omit query for fresh catalog requests. Read official SVWB card data and public deck/meta data. Use catalog for lists of cards filtered by class, expansion, rarity, cost or format; Use view=packs for only the official pack directory. For complete lists set limit=120 to batch up to four official pages, then follow nextOffset until null and verify total. Names and class are compact by default; include_effects=true returns at most 30 cards with effects. Do not search each card. Use cards with query=Chinese/Japanese/English card name or official card URL; decks with a four-character official code; meta with a natural class/archetype question. Snapshot eligibility is as of fetchedAt, not a future announcement: combine it with sourced format rules and dates for future changes. Unmatched indexes do not prove nonexistence. Use terminology for the bundled official Chinese/English/Japanese glossary (no network). query can contain one or more terms; omit query to browse, using offset/limit and nextOffset. view=terms returns compact name mappings; view=definitions also returns saved official meanings. Use known cached names without re-fetching web pages; only missing/new terms need official research. Use resource=packs for the bundled historical pack timeline: Chinese/Japanese/English names, official IDs, ordinal, full release dates with year and per-field provenance. Empty query lists all; query can be a name, ID, year or 第4彈. This snapshot cannot establish that a future release has or has not been announced; check current official news for that. For requested decks containing specific cards, query deck_library first: complete community 40-card lists cached locally, no network. query is an exact card name in Chinese/Japanese/English, or card_ids is an array of IDs that must ALL appear. filters supports class_id and format (default 1 rotation); limit defaults to 3, maximum 10. Keep source and syncedAt; a match does not establish strongest or current legality and no matches does not prove nonexistence. For requested decks containing specific cards, query deck_library first: complete community 40-card lists cached locally, no network. query is an exact card name in Chinese/Japanese/English, or card_ids is an array of IDs that must ALL appear. filters supports class_id and format (default 1 rotation); limit defaults to 3, maximum 10. Keep source and syncedAt; a match does not establish strongest or current legality and no matches does not prove nonexistence.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -72,7 +72,9 @@
               "decks",
               "meta",
               "terminology",
-              "packs"
+              "packs",
+              "deck_library",
+              "deck_library"
             ]
           },
           "query": {
@@ -153,6 +155,15 @@
               "effects"
             ],
             "description": "Snapshot catalog literal search scope. Use effects for effect-text questions; all searches both names and effects. Matching a word does not necessarily mean the card itself has that ability."
+          },
+          "card_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^[0-9]+$"
+            },
+            "maxItems": 8,
+            "description": "For deck_library: all required card IDs."
           }
         },
         "required": [
@@ -164,7 +175,7 @@
     {
       "type": "custom",
       "name": "report_svwb_progress",
-      "description": "Optionally edit the existing Discord progress message when you have a useful interim finding or a meaningful remaining check. Use brief natural Traditional Chinese, grounded only in evidence already read; distinguish provisional facts from conclusions. Do not send raw drafts, private reasoning, tool traces, repeated plans, budget details or a final answer here. Updates are throttled and may be coalesced. Continue working after this tool; the final answer replaces the same message. No update is necessary for short tasks.",
+      "description": "Publish an initial useful partial answer, or update that same Discord message as new evidence arrives. No automatic acknowledgement is sent. If research continues after a meaningful finding, share the grounded finding before more research; do not wait for the final answer. Public text immediately before a later tool call can also serve this purpose, so do not duplicate it here. Write natural Traditional Chinese containing substantive findings, not generic plans, raw drafts, private reasoning, tool traces or budget details. Each update should stand alone, retaining still-valid earlier findings. Continue working; the final answer replaces the same message. Short tasks can answer directly.",
       "input_schema": {
         "type": "object",
         "properties": {

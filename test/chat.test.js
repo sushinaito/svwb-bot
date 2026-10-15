@@ -258,18 +258,18 @@ test('two conversational turns reuse the pinned agent session and never replay o
   assert.equal(h.conversation.state.queue.length, 0);
 });
 
-test('accepted messages acknowledge before research and survive restart without another placeholder', async t => {
+test('accepted messages only type until there is content; short answers create one message after restart', async t => {
   const h = await harness(t, ['完整答案']);
   await h.enqueue(input('early'));
   assert.ok(!h.calls.some(c => c.path.startsWith('/v1/sessions')));
-  assert.equal(h.calls[0].body.content, '收到，我先看看。');
+  assert.ok(h.calls[0].path.endsWith('/typing'));
   const saved = await h.ctx.storage.get('conversation');
-  assert.ok(saved.queue[0].progressMessageId);
+  assert.equal(saved.queue[0].progressMessageId, undefined);
   await h.enqueue(input('early'));
-  assert.equal(h.calls.filter(c => c.path.endsWith('/messages')).length,1);
+  assert.equal(h.calls.filter(c => c.path.endsWith('/messages')).length,0);
   const restarted = new Conversation(h.ctx,h.localEnv); await h.ctx.ready; await restarted.alarm();
   assert.equal(h.calls.filter(c => c.path.endsWith('/messages')).length,1);
-  assert.equal(h.calls.filter(c => c.method === 'PATCH').at(-1).path, '/api/v10/channels/456/messages/'+saved.queue[0].progressMessageId);
+  assert.equal(h.calls.filter(c => c.method === 'PATCH').length,0);
   assert.deepEqual(h.replies,['完整答案']);
 });
 
@@ -280,13 +280,14 @@ test('useful interim findings edit the same message, coalesce rapid updates and 
     {id:'progress-wait',type:'session.status_idle',stop_reason:{type:'requires_action',event_ids:['progress-tool']},processed_at:'2026-10-15T05:01:01Z'});
   await h.conversation.alarm();
   let edits=h.calls.filter(c=>c.method==='PATCH');
-  assert.equal(edits.length,1); assert.match(edits[0].body.content,/處理中｜已確認卡包範圍/);
-  assert.deepEqual(h.replies,[]); assert.equal(h.conversation.state.current.phase,'poll');
+  assert.equal(edits.length,0);
+  assert.match(h.calls.find(c=>c.path.endsWith('/messages')).body.content,/已確認卡包範圍/);
+  assert.equal(h.conversation.state.current.phase,'poll');
   await h.conversation.progress('已核對一半。'); await h.conversation.progress('已核對全部，正在整理。');
-  assert.equal(h.calls.filter(c=>c.method==='PATCH').length,1);
+  assert.equal(h.calls.filter(c=>c.method==='PATCH').length,0);
   h.conversation.state.current.progressAt=Date.now()-16000; await h.conversation.save();
   const restarted=new Conversation(h.ctx,h.localEnv); await h.ctx.ready; await restarted.alarm();
-  edits=h.calls.filter(c=>c.method==='PATCH'); assert.equal(edits.length,2); assert.match(edits[1].body.content,/已核對全部/);
+  edits=h.calls.filter(c=>c.method==='PATCH'); assert.equal(edits.length,1); assert.match(edits[0].body.content,/已核對全部/);
   h.events.push({id:'final-progress',type:'agent.message',content:[{type:'text',text:'完整正式答案。'}],processed_at:'2026-10-15T05:02:00Z'},
     {id:'done-progress',type:'session.status_idle',stop_reason:{type:'end_turn'},processed_at:'2026-10-15T05:02:01Z'});
   await restarted.alarm();
@@ -310,23 +311,53 @@ test('deleted progress messages fall back to a final POST and long answers keep 
   assert.equal(posts[0].body.message_reference.message_id,'user-message');
 });
 
-test('budget denial replaces the acknowledgement', async t => {
+test('budget denial directly sends one notice without an acknowledgement', async t => {
   const h=await harness(t); h.budget.state.days[jstDay()]=190;
   await h.enqueue(input('denied')); await h.conversation.alarm();
   assert.equal(h.calls.filter(c=>c.path.endsWith('/messages')).length,1);
-  assert.match(h.calls.find(c=>c.method==='PATCH').body.content,/AI 預算/);
+  assert.match(h.calls.find(c=>c.path.endsWith('/messages')).body.content,/AI 預算/);
   assert.equal(h.conversation.state.current,null);
 });
 
-test('a failed acknowledgement retries with its stable nonce and does not stop generation', async t => {
-  const h=await harness(t,['已完成']);
-  const original=globalThis.fetch; let failed=false;
+test('a lost initial finding response retries with the same nonce and never stops research', async t => {
+  const h=await harness(t); h.setAutoAnswer(false);
+  const original=globalThis.fetch;
+  const attempts=[];
   t.mock.method(globalThis,'fetch',async(raw,init)=>{
-    if(!failed && String(raw).endsWith('/messages')) { failed=true;throw Error('Lost acknowledgement response'); }
+    if(String(raw).endsWith('/messages')) { attempts.push(JSON.parse(init.body)); if(attempts.length===1) throw new TypeError('Lost response'); }
     return original(raw,init);
   });
-  await h.enqueue(input('retry-ack'));assert.equal(h.conversation.state.queue[0].progressMessageId,undefined);
-  await h.conversation.alarm();assert.deepEqual(h.replies,['已完成']);assert.equal(h.conversation.state.blocked,undefined);
+  await h.enqueue(input('retry-progress')); await h.conversation.alarm();
+  await h.conversation.progress('這張卡的費用是3。');
+  assert.equal(h.conversation.state.current.input.progressMessageId,undefined);
+  h.conversation.state.current.progressAt=Date.now()-6000;
+  await h.conversation.progress();
+  assert.equal(attempts.length,2);assert.equal(attempts[0].nonce,attempts[1].nonce);
+  assert.ok(h.conversation.state.current.input.progressMessageId);assert.equal(h.conversation.state.blocked,undefined);
+});
+
+test('ordinary public findings between reads are delivered without the optional progress tool', async t => {
+  const h=await harness(t); h.setAutoAnswer(false);
+  await h.enqueue(input('natural-progress')); await h.conversation.alarm();
+  h.events.push({id:'plan',type:'agent.message',content:[{type:'text',text:'我先查一下。'}],processed_at:'2026-10-15T05:01:00Z'},
+    {id:'read-one',type:'agent.custom_tool_use',name:'read_svwb_source',input:{url:'https://gamewith.jp/shadowverse-wb/123'},processed_at:'2026-10-15T05:01:01Z'});
+  await h.conversation.alarm();
+  assert.equal(h.calls.filter(c=>c.path.endsWith('/messages')).length,0,'Initial plan is not an answer');
+  h.events.push({id:'finding',type:'agent.message',content:[{type:'thinking',thinking:'PRIVATE'}, {type:'text',text:'已確認這項能力只在自己的回合發動；下一步會核對觸發條件。'}],processed_at:'2026-10-15T05:01:02Z'},
+    {id:'read-two',type:'agent.custom_tool_use',name:'read_svwb_source',input:{url:'https://gamewith.jp/shadowverse-wb/456'},processed_at:'2026-10-15T05:01:03Z'});
+  await h.conversation.alarm();
+  assert.equal(h.calls.filter(c=>c.path.endsWith('/messages')).length,1);
+  assert.match(h.replies[0],/自己的回合/);assert.ok(!h.replies[0].includes('PRIVATE'));
+  const restarted=new Conversation(h.ctx,h.localEnv);await h.ctx.ready;
+  restarted.state.current.progressAt=Date.now()-6000;
+  h.events.push({id:'finding-two',type:'agent.message',content:[{type:'text',text:'已核對兩個來源：只有自己的回合，而且必須先進化。'}],processed_at:'2026-10-15T05:01:04Z'},
+    {id:'read-three',type:'agent.tool_use',name:'web_search',processed_at:'2026-10-15T05:01:05Z'});
+  await restarted.alarm();
+  assert.equal(h.calls.filter(c=>c.method==='PATCH').length,1);assert.match(h.replies[0],/必須先進化/);
+  h.events.push({id:'natural-final',type:'agent.message',content:[{type:'text',text:'最後確認的答案。'}],processed_at:'2026-10-15T05:01:06Z'},
+    {id:'natural-done',type:'session.status_idle',stop_reason:{type:'end_turn'},processed_at:'2026-10-15T05:01:07Z'});
+  await restarted.alarm();
+  assert.deepEqual(h.replies,['最後確認的答案。']);assert.equal(h.calls.filter(c=>c.path.endsWith('/messages')).length,1);
 });
 
 const imageInput = () => ({ images: [{ id: '111', messageId: 'm1', channelId: '456', filename: 'deck.png',
@@ -611,7 +642,8 @@ test('existing conversations receive new tools without replacing their session o
   assert.ok(update.body.agent.tools.some(t => t.name === 'read_svwb_source'));
   assert.ok(update.body.agent.tools.some(t => t.name === 'roll_dice'));
   assert.ok(update.body.agent.tools.some(t => t.name === 'make_custom_card'));
-  assert.equal(h.conversation.state.researchToolsVersion, 5);
+  assert.equal(h.conversation.state.researchToolsVersion, 7);
+  assert.ok(update.body.agent.tools.find(t => t.name === 'query_svwb_data').input_schema.properties.resource.enum.includes('deck_library'));
   assert.ok(update.body.agent.tools.find(t => t.name === 'query_svwb_data').input_schema.properties.resource.enum.includes('terminology'));
   assert.ok(h.calls.some(c => c.body?.events?.at(-1)?.type === 'system.message'));
   assert.ok(h.calls.some(c => c.body?.events?.some(e => e.type === 'system.message' && e.content?.some(b => b.text?.includes('功能與權限更新')))));
@@ -626,7 +658,7 @@ test('deployed conversation capabilities report both feature sets and renderer c
   } }; h.localEnv.FUN_API_TOKEN = 'configured';
   const response = await h.conversation.fetch(new Request('https://conversation/capabilities'));
   const status = await response.json();
-  assert.equal(status.funVersion, 3); assert.equal(status.rendererConfigured, true); assert.equal(status.catalogBatching, true);
+  assert.equal(status.funVersion, 4); assert.equal(status.progressReplyVersion, 2); assert.equal(status.rendererConfigured, true); assert.equal(status.catalogBatching, true);
   assert.equal(status.rendererAuthenticated, true);
   for (const name of ['read_svwb_source', 'query_svwb_data', 'roll_dice', 'pick_random_card', 'pick_random_craft', 'make_custom_card']) assert.ok(status.tools.includes(name));
   assert.equal(h.calls.length, 0); assert.equal(h.conversation.state.queue.length, 0);

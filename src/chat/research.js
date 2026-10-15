@@ -6,15 +6,17 @@ import { readPage, stripActive, textOf } from './guides.js';
 import { sourceDates } from './source-dates.js';
 import { lookupPacks } from './packs.js';
 import { cardCache } from './card-cache.js';
+import { deckCache } from './deck-cache.js';
 
 export function isLocalResearch(name,input) {
-  return name==='query_svwb_data' && (['terminology','packs'].includes(input?.resource) ||
+  return name==='query_svwb_data' && (['terminology','packs','deck_library'].includes(input?.resource) ||
     cardCache.metadata.available && !input?.fresh && (input.resource==='cards' || input.resource==='catalog' && [undefined,1].includes(input.filters?.format)));
 }
 
 export const RESEARCH_GUIDANCE = `通用查證流程（所有 SVWB 問題適用）：理解使用者要做的決定，自己拆解需確認的事實、選來源，不依賴預設題型清單。已有有效資料就使用，缺什麼才查什麼。公開資訊自己查，不把牌表、職業或網址當成回答一般問題的前提；合理假設要說明。
+找帶指定卡片的牌組，先用 query_svwb_data(resource=deck_library)：query 填完整中日英卡名，或 card_ids 填卡片 ID（多張代表全部包含），filters.class_id 篩職業、filters.format 篩賽制（預設指定系列），limit 最多10。這是每日增量保存的社群完整40張牌表，可直接附官方牌表、來源與同步日期；只找一套相符牌組不必再連網。查無結果只表示尚未收錄；最強、最新、合法性或額外條件仍須查證，不能用快取直接宣稱。不得把來源貼文日期與快取同步日期混為一談。
 已內建官方繁中全卡快照；catalog 可用 query 的字面卡名／卡效關鍵字搜尋，空白分隔代表同時符合，配合 filters、offset、limit 分頁。cards 可查完整卡名、ID 或網址，含衍生卡。verification=official_snapshot 依 fetchedAt 為準；一般名稱與卡效直接用快照，只有查新卡、改動或當前合法性才 fresh=true 讀官方，fresh catalog 不帶 query。
-同一則 Discord 訊息已先回覆收到。途中如有值得告知的已確認發現或重要待查事項，可用 report_svwb_progress 簡短更新；只根據已讀證據、不貼草稿或內部思考、不重複報進度。最後照常輸出完整答案。
+漸進回覆：使用者尚未收到制式確認訊息。先取得能直接回答問題的初步內容，再公開回覆；不要先說「收到／我先查」。若讀到重要發現後仍要繼續查詢，先用一兩句自然繁中說明已確認的重點及尚待核對的具體部分，再繼續工具；不要把所有內容留到最後。工具前的公開文字會更新同一則 Discord 訊息，也可用 report_svwb_progress；不要兩種重複發送。更新內容須能獨立閱讀，保留先前仍有效的要點，再補新發現，不要只報告讀了哪個網站或正在整理。只寫有來源支持的初步結論，不寫內部思考、原始工具內容或未查證草稿。短問題若一次就能答完，直接給正式答案，不必額外更新。最後照常輸出完整答案。
 以最新問題的主詞、範圍與用語為準，舊摘要只能補充背景，不能把新問題改成舊話題。卡牌用語：退環境／輪替／版本交替時退掉，是賽制牌池變更；削弱／下修是平衡調整；砍卡／換牌是構築取捨。先按語境理解，不能把這些混為一談。
 預載資料是起點，不代表來源已充分。對當前最強、強度比較或多套牌推薦，除非使用者限定某站，應讀至少兩個獨立且適用當前版本／賽制的來源，優先核對 GameWith 與 Game8 的近期強度榜／攻略，再結合 SVWB Meta、近期賽事或連勝牌表。不能因 Meta 已有數據就跳過其他評級；也不要只搜尋更多 Meta 引文。核對更新日期，區分編輯評級、賽事成績、社群樣本與個別玩家經驗，說明影響選擇的分歧；過期論壇討論不能補作「目前最強」的證據。某站讀取失敗就換近期可信來源，據實限制結論，不補造共識。單純指定一套牌、卡效或官方規則不需要為湊來源重複查詢。
 歷史卡包可用 query_svwb_data(resource=packs) 離線查期數、中日英名稱、完整發售日期和來源；空 query 列全部，亦可用卡包名、ID、年份或第4彈等查詢。快照最新已發售包只是歷史基準，不證明下一包已公布或尚未公布。
@@ -102,6 +104,11 @@ export async function executeResearchTool(name, input, fetcher = fetch) {
       return parseSource(await readPage(url, fetcher, AbortSignal.timeout(15000)), url, { offset, find });
     }
     if (name === 'query_svwb_data') {
+      if (input.resource === 'deck_library') {
+        if (input.fresh || Object.keys(input.filters || {}).some(k => !['class_id','format'].includes(k))) throw Error('Unsupported deck filters');
+        return deckCache.search({ query: input.query, card_ids: input.card_ids, class_id: input.filters?.class_id,
+          format: input.filters?.format === undefined ? 'rotation' : ({1:'rotation',2:'unlimited',3:'infinity'}[input.filters.format] || 'invalid'), limit: input.limit });
+      }
       if (input.resource === 'packs') return lookupPacks(input.query,input);
       if (input.resource === 'terminology') return lookupTerminology(input.query, input);
       if (input.resource === 'catalog') return await cardCatalog(input.filters, input.offset, fetcher, input);

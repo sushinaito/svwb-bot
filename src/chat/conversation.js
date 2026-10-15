@@ -3,6 +3,7 @@ import { deckContext } from './decks.js';
 import { metaContext } from './meta.js';
 import { cardContext } from './cards.js';
 import { cardCache } from './card-cache.js';
+import { deckCache, simpleDeckRequest, cachedDeckAnswer } from './deck-cache.js';
 import { packMetadata } from './packs.js';
 import { localizeReplyLabels } from './labels.js';
 import { guideContext } from './guides.js';
@@ -32,6 +33,7 @@ export const userEvent = input => ({ type: 'user.message', content: [{ type: 'te
   message: input.text,
   terminology: relevantTerminology(input.text),
   card_database: cardCache.metadata,
+  deck_database: deckCache.metadata,
   pack_database: packMetadata,
   ...(input.lastCompletedAnswer ? { previous_assistant_answer: input.lastCompletedAnswer } : {}),
   ...(input.replyContext ? { replying_to_bot_message: input.replyContext } : {}),
@@ -68,7 +70,6 @@ export class Conversation {
     this.ctx = ctx;
     this.env = env;
     this.running = false;
-    this.acknowledgements = new Map();
     ctx.blockConcurrencyWhile(async () => {
       this.state = await ctx.storage.get('conversation') || { queue: [], seen: [] };
     });
@@ -76,38 +77,27 @@ export class Conversation {
 
   save() { return this.ctx.storage.put('conversation', this.state); }
 
-  async acknowledge(input) {
-    if (input.command === 'reset' || input.progressMessageId || input.progressUnavailable || (input.ackAttempts || 0) >= 3) return;
-    if (this.acknowledgements.has(input.id)) return this.acknowledgements.get(input.id);
-    const pending = (async () => {
-      input.ackAttempts = (input.ackAttempts || 0) + 1;
-      await this.save();
-      try {
-        const [message] = await sendText(this.env, input.channelId,
-          this.state.current && this.state.current.input.id !== input.id ? '收到，前一則處理完就接著看這則。' : '收到，我先看看。',
-          `${input.id}:progress`, input.id);
-        if (message?.id) input.progressMessageId = message.id;
-      } catch { /* A failed acknowledgement must not prevent the actual answer. */ }
-      await this.save();
-    })();
-    this.acknowledgements.set(input.id, pending);
-    try { await pending; } finally { this.acknowledgements.delete(input.id); }
-  }
-
   async progress(message) {
     const job = this.state.current;
     if (message !== undefined) {
-      if (typeof message !== 'string' || !message.trim() || message.length > 800) return { status: 'unavailable', message: '進度須是 1–800 字的簡短使用者訊息。' };
+      if (typeof message !== 'string' || !message.trim() || message.length > 1800) return { status: 'unavailable', message: '初步回覆須是 1–1800 字的簡短使用者訊息。' };
       if (job.compacting) return { status: 'skipped' };
-      if (message !== job.lastProgress) job.pendingProgress = message.trim();
+      message = localizeReplyLabels(localizeDeckLinks(message.trim()), job.input);
+      if (needsChineseRewrite(message, job.input.text)) return { status: 'skipped', message: '請用自然繁中提供初步內容。' };
+      if (message !== job.lastProgress) job.pendingProgress = message;
       await this.save();
     }
-    if (!job.pendingProgress || !job.input.progressMessageId || (job.progressCount || 0) >= 6 ||
-        Date.now() - (job.progressAt || 0) < 15000) return { status: 'queued_or_skipped' };
+    if (!job.pendingProgress || job.input.progressUnavailable || (job.progressCount || 0) >= 8 ||
+        Date.now() - (job.progressAt || 0) < 5000) return { status: 'queued_or_skipped' };
     try {
-      await discord(this.env, `/channels/${job.input.channelId}/messages/${job.input.progressMessageId}`, 'PATCH', {
-        content: `處理中｜${job.pendingProgress}`, allowed_mentions: { parse: [], replied_user: false }, flags: 4,
-      });
+      if (job.input.progressMessageId) {
+        await discord(this.env, `/channels/${job.input.channelId}/messages/${job.input.progressMessageId}`, 'PATCH', {
+          content: job.pendingProgress, allowed_mentions: { parse: [], replied_user: false },
+        });
+      } else {
+        const [sent] = await sendText(this.env, job.input.channelId, job.pendingProgress, `${job.input.id}:progress`, job.input.id);
+        job.input.progressMessageId = sent.id;
+      }
       job.lastProgress = job.pendingProgress; delete job.pendingProgress;
       job.progressAt = Date.now(); job.progressCount = (job.progressCount || 0) + 1;
       await this.save();
@@ -117,6 +107,16 @@ export class Conversation {
       if (error.status === 404) { delete job.input.progressMessageId; job.input.progressUnavailable = true; }
       await this.save();
       return { status: 'unavailable', message: '進度訊息更新失敗；繼續完成原問題。' };
+    }
+  }
+
+  async publishInterim() {
+    const job = this.state.current;
+    // Only completed, public agent text after a source read is eligible. Thinking,
+    // search snippets and initial plans are never forwarded. A following tool
+    // call establishes that this is an interim response, not the final answer.
+    if (!job.compacting && job.readSource && job.answerParts?.length) {
+      await this.progress(job.answerParts.join('\n\n'));
     }
   }
 
@@ -153,7 +153,8 @@ export class Conversation {
       } catch { /* Keep deployment health readable while the service updates. */ }
       return json({ funVersion: FUN_VERSION, tools: [...agentSpec.tools, ...FUN_TOOLS].map(t => t.name || t.type),
         rendererConfigured, rendererAuthenticated, catalogBatching: true, deckDeliveryVersion: 2, naturalResponseStyle: true,
-        responseEditing: true, progressReplyVersion: 1, cardDatabase: cardCache.metadata, packDatabase: packMetadata,
+        responseEditing: true, progressReplyVersion: 2, cardDatabase: cardCache.metadata, packDatabase: packMetadata,
+        deckDatabase: deckCache.metadata, deckCacheVersion: 1,
         terminologyCount: TERMINOLOGY_COUNT, terminologyStorage: 'bundled_json' });
     }
     const input = await request.json();
@@ -176,7 +177,7 @@ export class Conversation {
     this.state.queue.push(input);
     await this.save();
     if (!await this.ctx.storage.getAlarm()) await this.ctx.storage.setAlarm(Date.now() + 100);
-    await this.acknowledge(input);
+    await discord(this.env, `/channels/${input.channelId}/typing`, 'POST').catch(() => {});
     return json({ accepted: true });
   }
 
@@ -218,7 +219,6 @@ export class Conversation {
     }
     const job = this.state.current;
     if (job.input.command === 'reset') { await this.reset(); return; }
-    await this.acknowledge(job.input);
     if (this.state.blocked) {
       await sendText(this.env, job.input.channelId, '這段對話暫停了，請先用 @我 加上 `reset` 清除紀錄。', job.input.id, job.input.id, job.input.progressMessageId);
       this.state.current = null;
@@ -235,6 +235,34 @@ export class Conversation {
       return;
     }
 
+    if (job.phase === 'prepare') {
+      // Exact, standalone requests can be answered before enrichment or an AI
+      // reservation. Extra conditions and quoted/image context stay with AI.
+      const filters = !job.input.images?.length && !job.input.replyContext && !job.input.referencedContext
+        ? simpleDeckRequest(job.input.text) : null;
+      const cached = filters ? deckCache.search({ ...filters, limit: 1 }) : null;
+      if (cached?.decks?.length) {
+        job.completedAnswer = cachedDeckAnswer(cached);
+        job.input.deliveryDecks = collectDeliveryDecks(cached);
+        job.phase = 'cached-deck';
+        await this.save();
+      }
+    }
+    if (job.phase === 'cached-deck') {
+      if (!job.outputChars) {
+        await sendText(this.env, job.input.channelId, job.completedAnswer, `${job.input.id}:answer`, job.input.id);
+        job.outputChars = job.completedAnswer.length;
+        await this.save();
+      }
+      if (!job.picturesHandled) {
+        await sendDeckPictures(this.env, job.input, job.completedAnswer, fetch, { linksInAnswer: true });
+        job.picturesHandled = true;
+      }
+      this.state.lastCompletedAnswer = { question: job.input.text, answer: job.completedAnswer };
+      this.state.current = null;
+      await this.save();
+      return;
+    }
     if (job.phase === 'prepare') {
       if (this.state.lastCompletedAnswer) job.input.lastCompletedAnswer = this.state.lastCompletedAnswer;
       if (!job.input.decks) job.input.decks = await deckContext(job.input.text);
@@ -309,7 +337,7 @@ export class Conversation {
       });
       this.state.sessionId = session.id;
       this.state.funToolsVersion = FUN_VERSION;
-      this.state.researchToolsVersion = 5;
+      this.state.researchToolsVersion = 7;
       this.state.researchPolicyVersion = 2;
       if (this.state.summary) job.input.memory = this.state.summary;
       job.phase = 'send';
@@ -322,9 +350,9 @@ export class Conversation {
     if (job.phase === 'update-budget') {
       // Tools can be updated while idle without replacing the session/history.
       await claude(this.env, `/sessions/${this.state.sessionId}`, 'POST', { budget: cap(job.capCents),
-        ...(this.state.researchToolsVersion !== 5 || this.state.funToolsVersion !== FUN_VERSION ? { agent: { tools: [...agentSpec.tools, ...FUN_TOOLS] } } : {}) });
+        ...(this.state.researchToolsVersion !== 7 || this.state.funToolsVersion !== FUN_VERSION ? { agent: { tools: [...agentSpec.tools, ...FUN_TOOLS] } } : {}) });
       this.state.funToolsVersion = FUN_VERSION;
-      this.state.researchToolsVersion = 5;
+      this.state.researchToolsVersion = 7;
       job.phase = 'send';
       await this.save();
     }
@@ -467,7 +495,8 @@ export class Conversation {
             ? Object.values(job.toolResults).filter(t=>t.local).length<24
             : Object.values(job.toolResults).filter(t=>!t.progress && !t.local).length<8),
             local, progress: event.name === 'report_svwb_progress', sent: false };
-          // Pre-tool agent prose is progress, not the eventual Discord answer.
+          if (event.name !== 'report_svwb_progress') await this.publishInterim();
+          // Public interim text is delivered separately from the final answer.
           job.answerParts = [];
           await this.save();
         }
@@ -478,7 +507,7 @@ export class Conversation {
               : await executeResearchTool(event.name, event.input)
             : { status: 'unavailable', message: '本輪直接查詢次數已用完，請依已有資料作答並標明缺口。' };
           if (event.name === 'read_svwb_source' && result.status === 'ok') job.readSource = true;
-          if (event.name === 'query_svwb_data' && ['terminology', 'cards', 'catalog'].includes(event.input?.resource) && result.status === 'ok') job.readSource = true;
+          if (event.name === 'query_svwb_data' && ['terminology', 'cards', 'catalog', 'packs', 'deck_library'].includes(event.input?.resource) && result.status === 'ok') job.readSource = true;
           const delivery = collectDeliveryDecks(result);
           if (delivery.length) {
             job.input.deliveryDecks = [...new Map([...(job.input.deliveryDecks || []), ...delivery].map(d => [d.deckUrl, d])).values()].slice(-24);
@@ -494,7 +523,9 @@ export class Conversation {
       }
       if (event.type === 'agent.tool_result' && job.fetchIds?.includes(event.tool_use_id) && !event.is_error &&
         !/url_not_accessible|not accessible|failed to fetch/i.test(JSON.stringify(event.content))) job.readSource = true;
-      if (event.type === 'agent.tool_use' || event.type === 'agent.mcp_tool_use') { job.answerParts = []; job.turnEnded = false; }
+      if (event.type === 'agent.tool_use' || event.type === 'agent.mcp_tool_use') {
+        await this.publishInterim(); job.answerParts = []; job.turnEnded = false;
+      }
       if (event.type === 'session.thread_status_idle' && event.stop_reason?.type === 'end_turn') job.turnEnded = true;
       if (event.type === 'session.error' || event.type === 'session.status_terminated') {
         await this.fail('AI 服務意外停止了，請用 @我 加上 `reset` 後重試。');

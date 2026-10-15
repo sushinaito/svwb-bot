@@ -4,7 +4,14 @@
   "private": true,
   "type": "module",
   "imports": {
-    "#card-snapshot": { "card-cache": "./data/official-cards-cht.json", "default": "./claude/empty-card-snapshot.json" }
+    "#card-snapshot": {
+      "card-cache": "./data/official-cards-cht.json",
+      "default": "./claude/empty-card-snapshot.json"
+    },
+    "#deck-snapshot": {
+      "deck-cache": "./data/deck-library.json",
+      "default": "./claude/empty-deck-snapshot.json"
+    }
   },
   "scripts": {
     "register:guild": "node scripts/register-commands.js",
@@ -14,8 +21,9 @@
     "chat:start": "node scripts/chat-admin.js start",
     "chat:stop": "node scripts/chat-admin.js stop",
     "chat:deploy": "wrangler deploy --config wrangler.chat.local.json",
-    "prechat:deploy": "node --conditions=card-cache scripts/check-card-cache.js",
+    "prechat:deploy": "node --conditions=card-cache scripts/check-card-cache.js && node --conditions=card-cache --conditions=deck-cache scripts/check-deck-cache.js",
     "cards:cache": "node scripts/cache-official-cards.js",
+    "decks:sync": "node scripts/sync-deck-library.js",
     "chat:verify": "node scripts/verify-chat.js",
     "fun:deploy": "wrangler deploy --config wrangler.fun.json",
     "fun:activate": "node scripts/activate-fun.js",

@@ -315,18 +315,50 @@ References:
   uncertainty survive rewriting. Editing does not grant permission to invent dates
   or replace a checked year with an ambiguous old table. Bounded live cases 9 and 10
   cover the user's strongest-three and next-update questions.
-- Each accepted chat request immediately posts a short acknowledgement before
-  research, persisting its Discord message ID. The optional `report_svwb_progress`
+- Accepted requests show typing without a canned acknowledgement. The first
+  useful finding creates a response and persists its Discord message ID. Public
+  agent text after evidence reads and before further tools is delivered, and `report_svwb_progress`
   tool edits that same message with a useful evidence-based interim finding. Updates
-  are coalesced, at least 15 seconds apart, with at most six interim edits per turn.
-  Raw agent drafts and internal reasoning are not streamed. Progress failures do not
+  are coalesced, at least 5 seconds apart, with at most eight interim updates per turn.
+  Initial plans and internal reasoning are not streamed. Progress failures do not
   block the answer, and a durable restart reuses the saved message. The final answer
   edits the first message; extra chunks and deck pictures follow normally. Budget
-  denials and errors replace the acknowledgement too. Deleted placeholders fall back
+  denials and errors replace interim content when present. Deleted messages fall back
   to a final POST. These Discord updates require no separate model generation.
-  To exercise both features through a disposable real old-agent session, run
-  `node --conditions=card-cache --env-file=.env.txt scripts/smoke-research.js 8`.
+  Case 8 explicitly requests a progress update; case 9 verifies a normal question
+  produces an initial finding and an intermediate edit without asking for progress.
+  Run `node --conditions=card-cache --env-file=.env.txt scripts/smoke-research.js 8,9`.
   Discord sends/edits are captured locally; the test incurs bounded AI charges.
+- Custom cards automatically use a single attached image. WebP attachments are
+  converted to PNG by Discord's own media proxy before the PNG/JPEG renderer;
+  signed-URL refresh and byte/dimension validation still apply. Artwork failures
+  cannot silently become empty cards. Escaped effect newlines are normalized.
+  Same-turn card corrections PATCH the existing image, even with a new tool ID;
+  duplicate content reuses the delivered result. Distinct requested cards use
+  explicit card slots. Final text edits preserve the uploaded embed.
+- `npm run decks:sync` saves complete community 40-card lists to the private,
+  Git-ignored `data/deck-library.json`. The initial October 15 snapshot has 363
+  distinct builds from the current SVWB Meta rotation/unlimited files and linked
+  GameWith/Game8 guides. Shadowverse Wins' latest posts are checked, but image-only
+  lists are not inferred or represented as structured coverage. This is a bounded
+  initial collection, not a claim to have downloaded every historical deck.
+  Subsequent runs skip completed versioned data files and old Wins posts, use
+  conditional requests/content hashes for guide pages, retain previous builds,
+  and merge new builds/sources by exact card quantities and format. Failures are
+  recorded without deleting prior data. `revision` changes only when usable
+  deck content changes; `lastCheckedAt` records daily checks independently.
+  `query_svwb_data(resource=deck_library)` searches locally by required card IDs,
+  exact multilingual name, class and format. Simple standalone requests such as
+  「來一套有帶ハウリングウルフマン的妖精」 bypass AI entirely: send the matching
+  official link and source/date first, then obtain the image and temporary code.
+  Extra constraints and quoted/image context use normal research. Cached matches
+  do not prove strength or current legality; no match does not prove nonexistence.
+  Validate with `node --conditions=card-cache --conditions=deck-cache scripts/check-deck-cache.js`
+  and `node --conditions=card-cache --conditions=deck-cache scripts/smoke-deck-cache.js`.
+  The smoke test captures Discord sends and fails on any AI/research HTTP request.
+  Daily Codex heartbeat: 09:00 Asia/Tokyo, on this computer. It runs the sync,
+  compares local and deployed revisions, and deploys only a changed library after
+  validation. Codex and the computer must be running. Daily sync never resets quota.
 - https://platform.claude.com/docs/en/managed-agents/events-and-streaming
 - Official game vocabulary lives in `claude/terminology.json`, bundled into the
   worker. Each entry has Traditional Chinese, English and Japanese names plus

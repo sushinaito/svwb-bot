@@ -60,7 +60,7 @@ for (const [index, item] of cases.entries()) {
           }
         } else {
           const content=JSON.parse(init.body).content;
-          if (content==='收到，我先看看。' || content.startsWith('處理中｜')) progress.push({method:init.method,id:messageId,content});
+          if (conversation.state.current?.phase !== 'settle') progress.push({method:init.method,id:messageId,content});
           else if(finalIndexes.has(messageId)) replies[finalIndexes.get(messageId)]=content;
           else { finalIndexes.set(messageId,replies.length); replies.push(content); }
         }
@@ -118,6 +118,8 @@ for (const [index, item] of cases.entries()) {
       if(result.blocked || /2026年?\s*10月\s*29日.{0,20}(?:推出|更新|登場|發售)/.test(result.reply) || /星期.{0,6}(?:有誤|誤植)/.test(result.reply)) throw Error('Old date was promoted to a future release');
     }
     if (item.multiSource) {
+      if (!progress.some(p=>p.method==='POST') || !progress.some(p=>p.method==='PATCH')) throw Error('Natural research did not publish initial content and a later interim edit');
+      if (progress.some(p=>/收到，我先看看/.test(p.content))) throw Error('Canned acknowledgement returned');
       const reads=events.filter(e=>e.type==='user.custom_tool_result').map(e=>JSON.parse(e.content[0].text)).filter(r=>r.status==='ok' && r.source && r.text);
       const hosts=[...new Set(reads.map(r=>new URL(r.source).hostname))];
       console.log(JSON.stringify({readSourceHosts:hosts}));
@@ -126,7 +128,7 @@ for (const [index, item] of cases.entries()) {
       continue;
     }
     if (item.cardCache) {
-      if (result.blocked || !result.reply.includes('群蟲惡兆') || !progress.some(p=>p.method==='PATCH')) throw Error('Card cache/progress flow failed');
+      if (result.blocked || !result.reply.includes('群蟲惡兆') || !progress.some(p=>p.method==='POST')) throw Error('Card cache/progress flow failed');
       if (result.tools.some(t=>['web_search','web_fetch','read_svwb_source'].includes(t.name))) throw Error('Snapshot lookup should need no web tools');
       const outputs=events.filter(e=>e.type==='user.custom_tool_result').map(e=>JSON.parse(e.content[0].text));
       if(!outputs.some(o=>o.verification==='official_snapshot' || o.cards?.some(c=>c.verification==='official_snapshot'))) throw Error('Snapshot evidence missing');

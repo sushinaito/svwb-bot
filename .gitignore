@@ -13,3 +13,5 @@ vendor/wbmaker/
 assets/wbmaker/
 data/official-cards-cht.json
 data/official-cards-cht.json.tmp
+data/deck-library.json
+data/deck-library.json.tmp

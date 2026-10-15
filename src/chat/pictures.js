@@ -22,7 +22,10 @@ export function collectDeliveryDecks(result) {
     deckUrl: l.url, label: '牌組', source: result.source,
   }));
   const exactDeck = deckImageUrl(result.deckUrl) ? [{ deckUrl: result.deckUrl, label: result.className || '牌組', source: result.source, cards: result.cards }] : [];
-  return [...exactDeck, ...metaDecks, ...linkedDecks].slice(0, 16);
+  const cachedDecks = (result.decks || []).filter(d => deckImageUrl(d.deckUrl)).map(d => ({
+    deckUrl: d.deckUrl, label: d.archetype || d.className || '牌組', cards: d.cards, source: d.sources?.[0]?.url,
+  }));
+  return [...exactDeck, ...metaDecks, ...cachedDecks, ...linkedDecks].slice(0, 16);
 }
 
 export function deckPictures(input, answer) {

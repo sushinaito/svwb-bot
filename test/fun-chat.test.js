@@ -4,22 +4,50 @@ import { executeFunTool } from '../src/chat/fun.js';
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC', 'base64');
 function harness(name, input, options = {}) {
   const job = { input: { id: '123', channelId: '456', guildId: '789', authorId: 'user', ...options.message }, toolResults: { tool: {} } };
-  const state = options.state || {}, posts = [], renders = [], snapshots = [];
+  const state = options.state || {}, posts = [], methods = [], renders = [], snapshots = [];
   const env = { ALLOWED_GUILD_IDS: '789', FUN_API_TOKEN: 'test', FUN: { fetch: async (url, init) => {
     renders.push(JSON.parse(init.body)); return new Response(png, { headers: { 'Content-Type': 'image/png' } });
   } } };
   const event = { id: 'tool', name, input };
   const fetcher = async (url, init) => {
-    if (new URL(url).hostname === 'cdn.discordapp.com') return new Response(png, { headers: { 'Content-Type': 'image/png' } });
+    if (['cdn.discordapp.com','media.discordapp.net'].includes(new URL(url).hostname)) {
+      if(options.artFails)return new Response(null,{status:500});
+      return new Response(png, { headers: { 'Content-Type': 'image/png' } });
+    }
     if (url === 'https://svwbmeta.com/api/manifest') return Response.json({ files: { cards: 'cards-abc.json' } });
     if (url.includes('svwbmeta.com/data/')) return Response.json({ '12345678': { names: { 'zh-Hant': '測試龍' }, classId: 4, cost: 5, rarity: 4, imgHash: { 'zh-Hant': 'a'.repeat(32) } } });
-    assert.equal(new URL(url).pathname, '/api/v10/channels/456/messages');
+    assert.ok(new URL(url).pathname.startsWith('/api/v10/channels/456/messages'));
+    methods.push(init.method);
     posts.push(init.body instanceof FormData ? JSON.parse(init.body.get('payload_json')) : JSON.parse(init.body));
     if (options.failOnce && posts.length === 1) throw new TypeError('Connection lost');
     return Response.json({ id: 'sent' });
   };
-  return { job, state, posts, renders, env, run: () => executeFunTool(env, event, job, state, async () => snapshots.push(structuredClone(job)), fetcher) };
+  return { job, state, posts, methods, renders, env, run: (next=event) => {
+    job.toolResults[next.id] ||= {};
+    return executeFunTool(env, next, job, state, async () => snapshots.push(structuredClone(job)), fetcher);
+  } };
 }
+
+test('a single WebP attachment is used automatically and same-turn corrections replace one card', async () => {
+  const art={id:'222',channelId:'456',messageId:'123',url:'https://cdn.discordapp.com/attachments/456/222/art.png',mediaType:'image/webp'};
+  const h=harness('make_custom_card',{name:'測試卡',effect:'入場曲 抽1張卡片。\\n\\n守護'},{message:{images:[art]}});
+  assert.equal((await h.run()).status,'ok');assert.match(h.renders[0].artwork,/^data:image\/png/);
+  assert.equal(h.renders[0].effect,'入場曲 抽1張卡片。\n\n守護');
+  await h.run({id:'fix',name:'make_custom_card',input:{reuse_previous:true,cost:5}});
+  assert.deepEqual(h.methods,['POST','PATCH']);assert.equal(h.posts[1].flags,0);
+  assert.equal(h.renders[1].artwork,h.renders[0].artwork);assert.equal(h.job.input.progressMessageId,'sent');
+  await h.run({id:'repeat-fix',name:'make_custom_card',input:{reuse_previous:true,cost:5}});
+  assert.equal(h.posts.length,2);assert.equal(h.renders.length,2);
+});
+
+test('artwork failure cannot silently fall back to an empty card when the model omits the image index', async () => {
+  const art={id:'222',channelId:'456',messageId:'123',url:'https://cdn.discordapp.com/attachments/456/222/art.webp',mediaType:'image/webp'};
+  const h=harness('make_custom_card',{name:'測試卡',artwork_index:1},{message:{images:[art]},artFails:true});
+  assert.equal((await h.run()).status,'unavailable');
+  assert.equal((await h.run({id:'retry-no-index',name:'make_custom_card',input:{name:'測試卡'}})).status,'unavailable');
+  assert.equal((await h.run({id:'remove-art',name:'make_custom_card',input:{name:'測試卡',clear_artwork:true}})).status,'unavailable');
+  assert.equal(h.posts.length,0);assert.equal(h.renders.length,0);
+});
 test('lost Discord response retries the identical random roll and nonce; settled tool is not posted twice', async () => {
   const h = harness('roll_dice', { dice: '2d20+3' }, { failOnce: true });
   await assert.rejects(h.run(), /Connection lost/);
