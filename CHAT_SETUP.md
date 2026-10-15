@@ -219,19 +219,25 @@ References:
   Custom tool results are retried by their idempotent event ID; only small markers
   are stored in the conversation. At most eight direct data/page reads run per turn.
   Search-only drafts receive one source-reading continuation when budget permits.
-- `ANSWER_RESERVE_CENTS=4` sets aside part of the existing 20-cent turn allowance
-  for the final answer. At the research ceiling, the bot disables further
-  investigation tools and uses the remaining allowance to answer from
-  collected evidence. It never increases the turn's reserved total or daily cap;
-  the provider's between-request enforcement can still overshoot a stage boundary.
-  The next turn restores research tools. Japanese proper names are distinguished
+- `ANSWER_RESERVE_CENTS=4` reserves part of the existing 20-cent turn allowance
+  for the final answer. A soft threshold interrupts research before admitting
+  another costly model request. A temporary session uses the same pinned model,
+  no tools, and bounded plain evidence to complete the answer, without inherited
+  web citation instructions that can produce untranslated quotations. Its cap
+  comes from the remaining turn allowance; both sessions' reported costs and
+  rounding margins are charged to the same reservation. Provider enforcement is
+  between requests, so a final request can still overshoot the cap. Temporary
+  sessions are deleted after delivery; the original conversation is retained and
+  receives the completed answer as context on its next turn. Japanese names are distinguished
   from sustained untranslated prose, so a mostly Chinese answer is not suppressed
   just because it contains several card or expansion names.
   `node --env-file=.env.txt scripts/smoke-research.js [0,1,2,3]` runs bounded live
   tests through the actual conversation state machine, captures Discord sends
   locally, and deletes test sessions. Tests incur provider charges outside the
   deployed daily ledger. Cases cover rules with old-session migration, game
-  systems, rotation, current news and a tempo-elf deck request (case 4).
+  systems, rotation, current news, a tempo-elf deck request (case 4), the captured
+  Dragon rotation failure (case 5), and a complete rotation list (case 6). The last
+  case compares every returned name against the complete official pack catalog.
   Results are saved only under `.wrangler/`.
 - Strategy questions (mulligans, opening hands, matchups and play patterns) prefer
   GameWith's SVWB guides, with Game8 as an additional research source. Named
@@ -264,6 +270,13 @@ References:
   Pronoun follow-ups can use a quoted message or card IDs from this conversation
   within 30 minutes. `reset` clears those IDs too. `/admin/source-health` verifies
   this official lookup without sending a Discord message or using AI tokens.
+- The generic `catalog` resource queries the official card-list API by class,
+  pack, rarity, cost or format. `view=packs` returns the pack directory;
+  `limit=120` batches up to four pages with duplicate/count/filter validation.
+  Compact names and class labels keep long lists affordable; effects are optional.
+  Responses expose `total` and `nextOffset`; partial data must not be called a
+  complete list. Future eligibility must be inferred from sourced rules and
+  announcements, not from today's legality flag alone.
 - https://platform.claude.com/docs/en/managed-agents/events-and-streaming
 - https://platform.claude.com/docs/en/managed-agents/budgets
 - https://docs.discord.com/developers/events/gateway

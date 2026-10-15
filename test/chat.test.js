@@ -147,7 +147,7 @@ async function harness(t, answers = [], options = {}) {
   const conversation = new Conversation(ctx, localEnv);
   await ctx.ready;
   const calls = [], replies = [], events = [];
-  let sequence = 0, usage = 0, autoAnswer = true, sessionCount = 0, sessionBudget, sessionTools = [], resumeRunning = false;
+  let sequence = 0, usage = 0, autoAnswer = true, sessionCount = 0, sessionBudget, sessionTools = [{ type: 'agent_toolset_20260401' }], resumeRunning = false, completion;
   const stamp = () => `2026-10-15T05:00:${String(++sequence).padStart(2, '0')}.000Z`;
   t.mock.method(globalThis, 'fetch', async (raw, init = {}) => {
     const url = new URL(raw), body = init.body ? JSON.parse(init.body) : undefined;
@@ -159,11 +159,31 @@ async function harness(t, answers = [], options = {}) {
       return Response.json({ id: `reply_${replies.length}` });
     }
     if (url.pathname === '/v1/sessions' && init.method === 'POST') {
+      if (body.agent.type === 'agent_with_overrides') {
+        completion = { id: 'sesn_completion', status: 'idle', budget: body.budget, events: [], usage: { list_cost: { currency: 'USD', amount: '0' } } };
+        return Response.json({ id: completion.id });
+      }
       sessionCount++;
       sessionBudget = body.budget;
       if (sessionCount > 1) usage = 0;
       events.push({ id: 'initial-idle', type: 'session.status_idle', stop_reason: { type: 'end_turn' }, processed_at: stamp() });
       return Response.json({ id: sessionCount === 1 ? 'sesn_test' : `sesn_test_${sessionCount}` });
+    }
+    if (url.pathname.startsWith('/v1/sessions/sesn_completion')) {
+      if (init.method === 'DELETE') return new Response(null,{status:204});
+      if (url.pathname.endsWith('/events')) {
+        if (init.method === 'POST') {
+          const submitted = body.events.map(e=>({...e,id:`completion_${sequence}`,processed_at:stamp()}));
+          completion.events.push(...submitted,
+            {id:'completed',type:'agent.message',content:[{type:'text',text:answers.shift() || '整理後的繁中答案'}],processed_at:stamp()},
+            {id:'completion-idle',type:'session.status_idle',stop_reason:{type:'end_turn'},processed_at:stamp()});
+          completion.usage.list_cost.amount='2';
+          if (options.loseCompletionResponse) { options.loseCompletionResponse=false; throw Error('Lost completion response'); }
+          return Response.json({data:submitted});
+        }
+        return Response.json({data:completion.events,next_page:null});
+      }
+      return Response.json(completion);
     }
     if (url.pathname.endsWith('/events') && init.method === 'POST') {
       if (options.rejectImages && body.events[0].content?.some(b => b.type === 'image')) return new Response(null, { status: 400 });
@@ -506,31 +526,33 @@ test('existing conversations receive new tools without replacing their session o
   assert.equal(h.calls.filter(c => c.path === '/v1/sessions' && c.method === 'POST').length, 1);
   const update = h.calls.find(c => c.body?.agent?.tools);
   assert.ok(update.body.agent.tools.some(t => t.name === 'read_svwb_source'));
-  assert.equal(h.conversation.state.researchToolsVersion, 1);
+  assert.equal(h.conversation.state.researchToolsVersion, 3);
   assert.ok(h.calls.some(c => c.body?.events?.at(-1)?.type === 'system.message'));
 });
 
-test('research budget exhaustion reserves a final answer within the same cap and restores tools on the next turn', async t => {
-  const h = await harness(t, ['已確認的繁中結論與來源。'], { resumeAtCap: true }); h.localEnv.ANSWER_RESERVE_CENTS = '4';
+test('research exhaustion completes from plain evidence within the remaining allowance and preserves the main conversation', async t => {
+  const h = await harness(t, ['已確認的繁中結論與來源。']); h.localEnv.ANSWER_RESERVE_CENTS = '4';
   h.setAutoAnswer(false); await h.enqueue(input('research')); await h.conversation.alarm();
-  assert.equal(h.calls.find(c => c.path === '/v1/sessions').body.budget.max_list_cost.amount, '16');
+  assert.equal(h.calls.find(c => c.path === '/v1/sessions').body.budget.max_list_cost.amount, '20');
   h.setUsage(16);
   h.events.push({ id: 'research-cap', type: 'session.status_idle', stop_reason: { type: 'budget_reached' }, processed_at: '2026-10-15T05:00:03.000Z' });
   await h.conversation.alarm();
-  assert.equal(h.conversation.state.current.phase, 'finalize-budget');
+  assert.equal(h.conversation.state.current.phase, 'finalize-stop');
   assert.equal(h.conversation.state.blocked, undefined);
   h.setAutoAnswer(true); await h.conversation.alarm();
-  await h.conversation.alarm();
-  await h.conversation.alarm();
+  for (let i = 0; i < 8 && h.conversation.state.current; i++) await h.conversation.alarm();
   assert.equal(h.conversation.state.current, null);
   assert.deepEqual(h.replies, ['已確認的繁中結論與來源。']);
   const finish = h.calls.find(c => c.body?.agent?.tools?.length === 0);
-  assert.equal(finish.body.budget.max_list_cost.amount, '20');
-  assert.ok(h.calls.some(c => c.body?.events?.[0]?.type === 'user.interrupt'), 'Interrupt and request completion only after the budget update');
-  assert.equal(budgetStatus(h.budget.state, env).accountedCents, 21);
+  assert.equal(finish.body.budget.max_list_cost.amount, '3');
+  assert.equal(finish.body.agent.type, 'agent_with_overrides');
+  assert.ok(h.calls.some(c => c.body?.events?.[0]?.type === 'user.interrupt'));
+  assert.equal(budgetStatus(h.budget.state, env).accountedCents, 20);
   assert.equal(budgetStatus(h.budget.state, env).reservedCents, 0);
   await h.enqueue(input('next')); await h.conversation.alarm();
-  assert.ok(h.calls.some(c => c.body?.agent?.tools?.some(t => t.name === 'read_svwb_source')));
+  assert.equal(h.conversation.state.sessionId,'sesn_test');
+  assert.ok(h.calls.some(c => c.path.endsWith('/sesn_completion') && c.method === 'DELETE'));
+  assert.ok(h.calls.some(c => c.body?.events?.some(e=>e.content?.some(b=>b.text?.includes('previous_assistant_answer')))));
 });
 
 test('search-only drafts get one bounded source-reading continuation before delivery', async t => {
@@ -546,4 +568,41 @@ test('search-only drafts get one bounded source-reading continuation before deli
   if (h.conversation.state.current) { h.conversation.state.current.since = null; await h.conversation.alarm(); }
   assert.deepEqual(h.replies, ['已補讀正文，這是答案。']);
   assert.equal(h.calls.filter(c => c.body?.budget).length, 1);
+});
+
+test('a costly source result after compaction is stopped before it can consume the final-answer allowance', async t => {
+  const h = await harness(t, ['下版退環境的龍族卡，依已讀卡包資料列出。']);
+  h.localEnv.ANSWER_RESERVE_CENTS = '4';
+  h.setAutoAnswer(false); await h.enqueue(input('rotation')); await h.conversation.alarm();
+  const job = h.conversation.state.current;
+  // Captured production boundary: summary cost left a 16-cent session cap;
+  // another model request at 12 cents jumped to 18 before any answer existed.
+  job.capCents = 16; job.researchCapCents = 12; job.priorCents = 3;
+  h.setUsage(12);
+  h.events.push({ id: 'expensive-page', type: 'agent.custom_tool_use', name: 'read_svwb_source', input: { url: 'https://gamewith.jp/shadowverse-wb/525586' }, processed_at: '2026-10-15T05:00:03.000Z' },
+    { id: 'waiting-page', type: 'session.status_idle', stop_reason: { type: 'requires_action', event_ids: ['expensive-page'] }, processed_at: '2026-10-15T05:00:04.000Z' });
+  await h.conversation.alarm();
+  assert.equal(h.conversation.state.current.phase, 'finalize-stop');
+  assert.equal(h.calls.some(c => c.body?.events?.some(e => e.type === 'user.custom_tool_result')), false);
+  h.setAutoAnswer(true);
+  for (let i = 0; i < 8 && h.conversation.state.current; i++) await h.conversation.alarm();
+  const interrupt = h.calls.findIndex(c => c.body?.events?.[0]?.type === 'user.interrupt');
+  const toolResult = h.calls.findIndex(c => c.body?.events?.some(e => e.type === 'user.custom_tool_result'));
+  assert.ok(interrupt >= 0 && toolResult > interrupt);
+  assert.match(h.replies[0], /下版退環境的龍族卡/);
+  assert.equal(h.conversation.state.blocked, undefined);
+  assert.equal(budgetStatus(h.budget.state, env).accountedCents, 19);
+});
+
+test('uncertain completion submission recovers after a durable restart without another generation', async t => {
+  const h=await harness(t,['可核實的完整答案。'],{loseCompletionResponse:true});
+  h.localEnv.ANSWER_RESERVE_CENTS='4'; h.setAutoAnswer(false);
+  await h.enqueue(input('complete-retry')); await h.conversation.alarm(); h.setUsage(14);
+  h.events.push({id:'waiting',type:'session.status_idle',stop_reason:{type:'requires_action'},processed_at:'2026-10-15T05:00:03.000Z'});
+  for(let i=0;i<4;i++) await h.conversation.alarm();
+  assert.equal(h.conversation.state.current.phase,'complete-sending');
+  const restarted=new Conversation(h.ctx,h.localEnv); await h.ctx.ready; await restarted.alarm();
+  assert.equal(restarted.state.current,null); assert.deepEqual(h.replies,['可核實的完整答案。']);
+  assert.equal(h.calls.filter(c=>c.path==='/v1/sessions/sesn_completion/events' && c.method==='POST').length,1);
+  assert.equal(budgetStatus(h.budget.state,env).accountedCents,18);
 });

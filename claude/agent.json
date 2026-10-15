@@ -25,6 +25,7 @@
         {
           "name": "web_fetch",
           "enabled": true,
+          "max_content_tokens": 6000,
           "permission_policy": {
             "type": "always_allow"
           }
@@ -59,7 +60,7 @@
     {
       "type": "custom",
       "name": "query_svwb_data",
-      "description": "Look up official SVWB card facts, a shared deck code, or public meta data on demand. Use cards with a full Chinese/Japanese/English name or official card URL; decks with a four-character official deck code; meta with a natural question naming class/archetype/format. This supplies evidence, not a final answer; an unmatched index is not proof that something does not exist. Combine with source reading for rules, systems, news, strategy and any other SVWB topic.",
+      "description": "Read official SVWB card data and public deck/meta data. Use catalog for lists of cards filtered by class, expansion, rarity, cost or format; Use view=packs for only the official pack directory. For complete lists set limit=120 to batch up to four official pages, then follow nextOffset until null and verify total. Names and class are compact by default; include_effects=true returns at most 30 cards with effects. Do not search each card. Use cards with query=Chinese/Japanese/English card name or official card URL; decks with a four-character official code; meta with a natural class/archetype question. Catalog eligibility is current, not a future announcement: combine it with sourced format rules and dates for future changes. Unmatched indexes do not prove nonexistence.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -67,6 +68,7 @@
             "type": "string",
             "enum": [
               "cards",
+              "catalog",
               "decks",
               "meta"
             ]
@@ -74,11 +76,66 @@
           "query": {
             "type": "string",
             "maxLength": 500
+          },
+          "filters": {
+            "type": "object",
+            "properties": {
+              "class_id": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 7,
+                "description": "0 neutral, 1 elf, 2 royal, 3 witch, 4 dragon, 5 nightmare, 6 bishop, 7 nemesis"
+              },
+              "pack_id": {
+                "type": "integer",
+                "description": "ID from the returned official packs directory"
+              },
+              "rarity": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4,
+                "description": "1 bronze, 2 silver, 3 gold, 4 legendary"
+              },
+              "cost": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 30
+              },
+              "format": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4,
+                "description": "1 rotation, 2 unlimited, 3 infinity, 4 starter"
+              }
+            },
+            "additionalProperties": false
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Catalog pagination; use nextOffset from the previous result"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 120,
+            "description": "Catalog cards per batch, default 30. Use 120 for a complete expansion."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "cards",
+              "packs"
+            ],
+            "description": "packs returns only pack metadata; cards returns the filtered card list (default)."
+          },
+          "include_effects": {
+            "type": "boolean",
+            "description": "Default false for compact complete lists; true returns effects for at most 30 cards."
           }
         },
         "required": [
-          "resource",
-          "query"
+          "resource"
         ],
         "additionalProperties": false
       }

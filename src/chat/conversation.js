@@ -11,6 +11,7 @@ import { compactionThreshold, requestContextTokens, summaryEvent } from './conte
 import { sendDeckPictures } from './pictures.js';
 import { loadImages } from './vision.js';
 import preferredSources from '../../claude/sources.json' with { type: 'json' };
+import { COMPLETION_SYSTEM, completionEvidence } from './completion.js';
 
 const cap = cents => ({ type: 'limit', max_list_cost: { amount: String(cents), currency: 'USD' } });
 export const userEvent = input => ({ type: 'user.message', content: [{ type: 'text', text:
@@ -21,6 +22,7 @@ export const userEvent = input => ({ type: 'user.message', content: [{ type: 'te
   current_date_jst: new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10),
   speaker: { id: input.authorId, name: input.authorName },
   message: input.text,
+  ...(input.lastCompletedAnswer ? { previous_assistant_answer: input.lastCompletedAnswer } : {}),
   ...(input.replyContext ? { replying_to_bot_message: input.replyContext } : {}),
   ...(input.referencedContext ? { replying_to_message: input.referencedContext } : {}),
   ...(input.imageReport?.length ? { image_reading: input.imageReport } : {}),
@@ -154,7 +156,14 @@ export class Conversation {
       return;
     }
 
+    if (job.phase.startsWith('complete-')) {
+      await this.completeAnswer();
+      if (job.phase === 'settle') await this.finish();
+      return;
+    }
+
     if (job.phase === 'prepare') {
+      if (this.state.lastCompletedAnswer) job.input.lastCompletedAnswer = this.state.lastCompletedAnswer;
       if (!job.input.decks) job.input.decks = await deckContext(job.input.text);
       if (job.input.meta === undefined) job.input.meta = await metaContext(job.input.text, fetch, undefined, job.input.replyContext?.text || job.input.referencedContext?.text);
       if (job.input.guides === undefined) job.input.guides = await guideContext(job.input.text, job.input.meta);
@@ -221,11 +230,11 @@ export class Conversation {
         agent: { type: 'agent', id: this.env.CLAUDE_AGENT_ID, version: Number(this.env.CLAUDE_AGENT_VERSION || 1) },
         environment_id: this.env.CLAUDE_ENVIRONMENT_ID,
         title: `Discord ${job.input.thread ? 'thread' : 'conversation'} ${job.input.channelId}`,
-        budget: cap(job.researchCapCents ?? job.capCents),
+        budget: cap(job.capCents),
       });
       this.state.sessionId = session.id;
-      this.state.researchToolsVersion = 1;
-      this.state.researchPolicyVersion = 1;
+      this.state.researchToolsVersion = 3;
+      this.state.researchPolicyVersion = 2;
       if (this.state.summary) job.input.memory = this.state.summary;
       job.phase = 'send';
       await this.save();
@@ -236,46 +245,37 @@ export class Conversation {
 
     if (job.phase === 'update-budget') {
       // Tools can be updated while idle without replacing the session/history.
-      await claude(this.env, `/sessions/${this.state.sessionId}`, 'POST', { budget: cap(job.researchCapCents ?? job.capCents),
-        ...(this.state.researchToolsVersion !== 1 ? { agent: { tools: agentSpec.tools } } : {}) });
-      this.state.researchToolsVersion = 1;
+      await claude(this.env, `/sessions/${this.state.sessionId}`, 'POST', { budget: cap(job.capCents),
+        ...(this.state.researchToolsVersion !== 3 ? { agent: { tools: agentSpec.tools } } : {}) });
+      this.state.researchToolsVersion = 3;
       job.phase = 'send';
       await this.save();
     }
 
-    if (job.phase === 'finalize-budget') {
-      const session = await claude(this.env, `/sessions/${this.state.sessionId}`);
-      // Retry-safe: don't change a running session if the update was accepted.
-      if (Number(session.budget?.max_list_cost?.amount) !== job.capCents || session.agent?.tools?.length !== 0) {
-        await claude(this.env, `/sessions/${this.state.sessionId}`, 'POST', { budget: cap(job.capCents), agent: { tools: [] } });
-      }
-      delete this.state.researchToolsVersion;
-      // A budget update resumes paused work asynchronously. Interrupt in a
-      // separate request after it becomes running; an interrupt in a batch
-      // while still budget-paused is accepted but ignored by the API.
-      job.phase = 'finalize-interrupt';
-      await this.save();
-      return;
+    if (job.phase === 'finalize-stop') {
+      // Stop BEFORE settling a pending tool: posting its result would admit
+      // another model request and can spend the entire answer reserve at once.
+      await claude(this.env, `/sessions/${this.state.sessionId}/events`, 'POST', { events: [{ type: 'user.interrupt' }] });
+      job.phase = 'finalize-drain'; await this.save(); return;
     }
 
-    if (job.phase === 'finalize-interrupt') {
+    if (job.phase === 'finalize-drain') {
+      const events = await eventsSince(this.env, this.state.sessionId, job.since);
+      const settled = new Set(events.filter(e => e.type === 'user.custom_tool_result').map(e => e.custom_tool_use_id));
+      const pending = events.filter(e => e.type === 'agent.custom_tool_use' && !settled.has(e.id) && !job.toolResults?.[e.id]?.sent);
+      for (const event of pending) {
+        await claude(this.env, `/sessions/${this.state.sessionId}/events`, 'POST', { events: [researchResultEvent(event.id,
+          { status: 'unavailable', message: '研究已停止以保留回答額度。這個操作沒有執行；請依已讀資料完成原問題的答案。' })] });
+        job.toolResults ||= {}; job.toolResults[event.id] = { allowed: false, sent: true }; await this.save();
+      }
       const session = await claude(this.env, `/sessions/${this.state.sessionId}`);
-      if (session.status !== 'idle') {
-        await claude(this.env, `/sessions/${this.state.sessionId}/events`, 'POST', { events: [{ type: 'user.interrupt' }] });
-        return;
-      }
-      const recent = await claude(this.env, `/sessions/${this.state.sessionId}/events?order=desc&limit=20`);
-      const idle = recent.data.filter(e => e.type === 'session.status_idle').sort((a,b) => String(b.processed_at).localeCompare(String(a.processed_at)))[0];
-      if (idle?.stop_reason?.type === 'budget_reached' && readCost(session) < job.capCents - 1) return;
-      if (readCost(session) >= job.capCents - 1) {
-        this.state.blocked = 'turn_budget';
-        job.notice = '這次查證已達單次預算上限，沒能完成全部內容。';
-        job.phase = 'settle'; await this.save(); return;
-      }
-      job.finalizePending = true;
-      job.userProcessed = false; delete job.userEventId;
-      job.phase = 'send';
-      await this.save();
+      if (session.status !== 'idle') { job.phase = 'finalize-stop'; await this.save(); return; }
+      job.phase = 'complete-prepare'; await this.save(); return;
+    }
+
+    // Resume persisted work from the previous worker version safely.
+    if (['finalize-budget', 'finalize-interrupt'].includes(job.phase)) {
+      job.phase = 'finalize-stop'; await this.save(); return;
     }
 
     if (job.phase === 'send') {
@@ -301,7 +301,7 @@ export class Conversation {
       let result;
       try { result = await claude(this.env, `/sessions/${this.state.sessionId}/events`, 'POST', {
         events: job.finalizePending ? [event, { type: 'system.message', content: [{ type: 'text', text: '僅此則收尾回答：根據已有證據直接用自然台灣繁中回答，約300～600字元。引用只能附來源連結，不能貼英文或日文原句。專名可保留原文。不要再搜尋或呼叫工具；先給能確認的結論，再精確指出缺口。下一輪恢復正常查證。' }] }] : [event,
-          ...(this.state.researchPolicyVersion === 1 ? [] : [{ type: 'system.message', content: [{ type: 'text', text:
+          ...(this.state.researchPolicyVersion === 2 ? [] : [{ type: 'system.message', content: [{ type: 'text', text:
             '查證流程更新：以此通用流程取代先前針對個別問題的查詢指引。\n' + RESEARCH_GUIDANCE }] }])],
       }); }
       catch (error) {
@@ -315,7 +315,7 @@ export class Conversation {
         throw error;
       }
       job.userEventId = (result.data.find(e => e.type === 'user.message') || result.data[job.finalizePending ? 1 : 0]).id;
-      this.state.researchPolicyVersion = 1;
+      this.state.researchPolicyVersion = 2;
       job.finalizePending = false;
       job.phase = 'poll';
       await this.save();
@@ -325,7 +325,7 @@ export class Conversation {
       const expected = job.eventText || userEvent(job.input).content[0].text;
       const events = await eventsSince(this.env, this.state.sessionId, job.since);
       const sent = events.find(e => e.type === 'user.message' && e.content?.some(b => b.text === expected));
-      if (sent) { job.userEventId = sent.id; this.state.researchPolicyVersion = 1; job.finalizePending = false; job.phase = 'poll'; await this.save(); }
+      if (sent) { job.userEventId = sent.id; this.state.researchPolicyVersion = 2; job.finalizePending = false; job.phase = 'poll'; await this.save(); }
       else if (Date.now() - job.sentAt > 60000) await this.fail('目前無法確認 AI 是否收到訊息，為了避免重複送出，我先暫停對話。請用 @我 加上 `reset` 後重試。');
       return;
     }
@@ -341,6 +341,18 @@ export class Conversation {
       job.typedAt = Date.now();
     }
     const events = await eventsSince(this.env, this.state.sessionId, job.since);
+    if (job.answerReserve && !job.compacting && !job.finalizationAttempted) {
+      const lastIdle = events.findLast(e => e.type === 'session.status_idle');
+      // A soft research threshold is checked while tools are still waiting,
+      // rather than relying on the provider's between-request hard limit.
+      if (lastIdle?.stop_reason?.type !== 'end_turn') {
+        const session = await claude(this.env, `/sessions/${this.state.sessionId}`);
+        if (readCost(session) >= (job.researchCapCents ?? job.capCents) - 2 && readCost(session) < job.capCents - 1) {
+          job.finalizationAttempted = true; job.answerParts = [];
+          job.phase = 'finalize-stop'; await this.save(); return;
+        }
+      }
+    }
     // A new session can emit idle before the first user event is processed.
     // Ignore all history until this turn's accepted event is encountered.
     if (!job.userProcessed) {
@@ -405,7 +417,7 @@ export class Conversation {
           } else if (!job.compacting && !job.finalizationAttempted && job.answerReserve && readCost(session) < job.capCents - 1) {
             job.finalizationAttempted = true;
             job.answerParts = [];
-            job.phase = 'finalize-budget';
+            job.phase = 'finalize-stop';
           } else {
             this.state.blocked = 'turn_budget';
             job.notice = '這次查證已達單次預算上限，沒能完成全部內容。可以用 @我 加上 `reset` 重新開始，仍受今日剩餘預算限制。';
@@ -431,7 +443,7 @@ export class Conversation {
     const job = this.state.current;
     const session = await claude(this.env, `/sessions/${this.state.sessionId}`);
     if (session.status !== 'idle') return;
-    const answer = (job.answerParts || []).join('\n\n');
+    const answer = job.completedAnswer ?? (job.answerParts || []).join('\n\n');
     if (!job.compacting && job.searched && !job.readSource && !job.evidenceRepair && !job.finalizationAttempted &&
         !job.notice && readCost(session) < (job.researchCapCents ?? job.capCents) - 2) {
       job.evidenceRepair = true;
@@ -454,7 +466,7 @@ export class Conversation {
       job.notice ||= '整理對話摘要時沒有完成，原本的紀錄還在。請稍後再試。';
     }
     const needsRewrite = !job.compacting && needsChineseRewrite(answer, job.input.text);
-    if (needsRewrite && !job.repairAttempted && !job.notice && readCost(session) < job.capCents - 1) {
+    if (needsRewrite && !job.repairAttempted && !job.notice && job.completedAnswer === undefined && readCost(session) < job.capCents - 2) {
       // Reuse this turn's reservation and existing session cap. Never restart
       // research or grant extra budget for a formatting correction.
       job.repairAttempted = true;
@@ -465,13 +477,13 @@ export class Conversation {
       job.answerParts = [];
       job.userProcessed = false;
       delete job.userEventId;
-      job.phase = job.finalizePending ? 'finalize-budget' : 'send';
+      job.phase = job.finalizePending ? 'complete-prepare' : 'send';
       await this.save();
       return;
     }
     // Reported costs are rounded to cents. Add one cent to the difference so
     // reclaiming a reservation does not underestimate the true turn cost.
-    const charged = (job.priorCents || 0) + Math.max(0, readCost(session) - job.baseline) + (job.compactedSummary ? 2 : 1);
+    const charged = (job.priorCents || 0) + Math.max(0, readCost(session) - job.baseline) + (job.completionCost || 0) + (job.compactedSummary ? 2 : 1) + (job.completionSessionId ? 1 : 0);
     await this.budget('/settle', { id: job.input.id, cents: charged });
     if (answer && !needsRewrite && !job.compacting) {
       await sendText(this.env, job.input.channelId, answer, `${job.input.id}:answer`, job.input.id);
@@ -490,9 +502,72 @@ export class Conversation {
       await sendText(this.env, job.input.channelId, job.notice || '這次沒有產生文字回覆，可以換個方式再問一次嗎？', `${job.input.id}:done`, job.input.id);
     }
     this.state.lastTurnAt = job.input.receivedAt || Date.now();
+    if (job.completedAnswer && job.outputChars) this.state.lastCompletedAnswer = { question: job.input.text, answer: job.completedAnswer.slice(0,12000) };
+    else if (job.outputChars) delete this.state.lastCompletedAnswer;
+    if (job.completionSessionId) {
+      try { await claude(this.env, `/sessions/${job.completionSessionId}`, 'DELETE'); }
+      catch (error) { if (error.status !== 404) throw error; }
+    }
     this.state.imageCount = (this.state.imageCount || 0) + (job.sentImageCount || 0);
     this.state.current = null;
     await this.save();
+  }
+
+  async completeAnswer() {
+    const job = this.state.current;
+    if (job.phase === 'complete-prepare') {
+      const research = await claude(this.env, `/sessions/${this.state.sessionId}`);
+      if (research.status !== 'idle') return;
+      const remaining = job.capCents - readCost(research) - 1;
+      if (remaining < 2) {
+        job.notice = '這次查證已達單次預算上限，沒能完成全部內容。';
+        job.phase = 'settle'; await this.save(); return;
+      }
+      const all = await eventsSince(this.env, this.state.sessionId, job.since);
+      const start = all.findIndex(e => e.id === job.userEventId);
+      job.completionInput = JSON.stringify(completionEvidence(job.input, start < 0 ? all : all.slice(start)));
+      job.completionCap = Math.min(remaining, 6);
+      job.phase = 'complete-create'; await this.save();
+    }
+    if (job.phase === 'complete-create') {
+      // Session creation is not idempotent. Persist the uncertain phase first.
+      job.phase = 'complete-creating'; await this.save();
+      const session = await claude(this.env, '/sessions', 'POST', {
+        agent: { type: 'agent_with_overrides', id: this.env.CLAUDE_AGENT_ID,
+          version: Number(this.env.CLAUDE_AGENT_VERSION || 1), system: COMPLETION_SYSTEM, tools: [], mcp_servers: [], skills: [] },
+        environment_id: this.env.CLAUDE_ENVIRONMENT_ID,
+        title: 'SVWB answer completion', budget: cap(job.completionCap),
+      });
+      job.completionSessionId = session.id;
+      job.phase = 'complete-send'; await this.save();
+    } else if (job.phase === 'complete-creating') {
+      await this.fail('整理回覆時連線中斷，為避免重複計費，這段對話已暫停。請用 @我 加上 `reset` 後重試。');
+      return;
+    }
+    if (job.phase === 'complete-send') {
+      job.phase = 'complete-sending'; job.completionSentAt = Date.now(); await this.save();
+      await claude(this.env, `/sessions/${job.completionSessionId}/events`, 'POST', {
+        events: [{ type: 'user.message', content: [{ type: 'text', text: job.completionInput }] }],
+      });
+      job.phase = 'complete-poll'; await this.save();
+    }
+    const events = await eventsSince(this.env, job.completionSessionId);
+    const own = events.findIndex(e => e.type === 'user.message' && messageText(e.content) === job.completionInput);
+    if (own < 0) {
+      if (Date.now() - job.completionSentAt > 60000) await this.fail('目前無法確認 AI 是否收到收尾請求，這段對話已暫停。');
+      return;
+    }
+    job.phase = 'complete-poll';
+    const turn = events.slice(own), idle = turn.findLast(e => e.type === 'session.status_idle' && e.processed_at);
+    if (!idle) return;
+    const session = await claude(this.env, `/sessions/${job.completionSessionId}`);
+    if (session.status !== 'idle') return;
+    job.completionCost = readCost(session);
+    const reason = idle.stop_reason?.type || idle.stop_reason;
+    const ended = reason === 'end_turn' || turn.some(e => e.type === 'session.thread_status_idle' && e.stop_reason?.type === 'end_turn');
+    job.completedAnswer = ended ? turn.filter(e => e.type === 'agent.message').map(e => messageText(e.content)).join('\n\n') : '';
+    if (!job.completedAnswer) job.notice = '這次資料已查到，但答案整理沒有完成。';
+    job.phase = 'settle'; await this.save();
   }
 
   async fail(message) {
@@ -501,6 +576,11 @@ export class Conversation {
     this.state.blocked = 'error';
     if (this.state.sessionId) {
       await claude(this.env, `/sessions/${this.state.sessionId}/events`, 'POST', { events: [{ type: 'user.interrupt' }] }).catch(() => {});
+    }
+    if (job.completionSessionId) {
+      await claude(this.env, `/sessions/${job.completionSessionId}/events`, 'POST', { events: [{ type: 'user.interrupt' }] }).catch(() => {});
+      this.state.retiredSessions ||= [];
+      if (!this.state.retiredSessions.includes(job.completionSessionId)) this.state.retiredSessions.push(job.completionSessionId);
     }
     // Keep an uncertain cost reservation until reset. No new agent requests
     // can run in this conversation while it is blocked.
@@ -512,7 +592,7 @@ export class Conversation {
 
   async reset() {
     const job = this.state.current;
-    for (const id of [this.state.sessionId, ...(this.state.retiredSessions || [])].filter(Boolean)) {
+    for (const id of [this.state.sessionId, job.completionSessionId, ...(this.state.retiredSessions || [])].filter(Boolean)) {
       // Deleting the session also removes its saved transcript and sandbox.
       try { await claude(this.env, `/sessions/${id}`, 'DELETE'); }
       catch (error) { if (error.status !== 404) throw error; }
@@ -535,6 +615,7 @@ export class Conversation {
     delete this.state.lastTurnAt;
     delete this.state.lastCardIds;
     delete this.state.lastCardsAt;
+    delete this.state.lastCompletedAnswer;
     await this.save();
     await sendText(this.env, job.input.channelId, '對話紀錄清掉了！想聊哪副牌，或哪個 SVWB 問題？', job.input.id, job.input.id);
     this.state.current = null;

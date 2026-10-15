@@ -35,6 +35,7 @@ export default {
       const source = await executeResearchTool('read_svwb_source', { url: 'https://gamewith.jp/shadowverse-wb/' });
       const wins = await executeResearchTool('read_svwb_source', { url: 'https://shadowverse-wins.com/' });
       const shorthand = await cardContext('quick blader');
+      const catalog = await executeResearchTool('query_svwb_data', { resource: 'catalog', view: 'packs' });
       const picture = deckPictures({ meta: result }, result.archetypes?.[0]?.name || '')[0];
       let image = { status: 'unavailable' };
       if (picture) {
@@ -48,6 +49,7 @@ export default {
       return json({ status: result.status, diagnostic, window: result.window, archetypes: result.archetypes?.map(a => a.name), image, card,
         generalResearch: { status: source.status, source: source.source, characters: source.text?.length, headings: source.headings?.length },
         wins: { status: wins.status, source: wins.source, characters: wins.text?.length },
+        catalog: { status: catalog.status, verification: catalog.verification, total: catalog.total, packs: catalog.packs },
         shorthandCard: { status: shorthand?.status, id: shorthand?.cards?.[0]?.id, name: shorthand?.cards?.[0]?.name, verification: shorthand?.cards?.[0]?.verification },
         strategy: { status: strategy?.status, targets: strategy?.strategyTargets, totalCards: strategy?.archetypes?.[0]?.decks?.[0]?.cards?.reduce((n,c) => n + c.quantity, 0),
           guide: { status: guide?.status, source: guide?.guides?.[0]?.source, updatedAt: guide?.guides?.[0]?.updatedAt, sections: guide?.guides?.[0]?.sections?.map(s => s.heading) } },
