@@ -1,14 +1,17 @@
 import { integer } from './common.js';
 function text(value, max, label, required = false) {
   if (value !== undefined && typeof value !== 'string') throw Error(`${label} 必須是文字。`);
-  const s = (value || '').trim();
+  const s = (value || '').replace(/[（(]\s*DIY\s*[)）]/gi, '').trim();
   if ((required && !s) || [...s].length > max || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(s)) throw Error(`${label} 請填寫 ${required ? '1' : '0'}～${max} 個字。`);
   return s;
 }
+// Correct a mislabeled ability at the start of an effect line, preserving prose
+// and card names that legitimately contain 登場.
+const effectText = (value, max, label) => text(value, max, label).replace(/(^|\n)([ \t]*)登場(?=[ \t:：])/g, '$1$2入場曲');
 export function validateCard(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw Error('請提供卡片資料。');
-  const card = { name: text(input.name, 36, '卡名', true), effect: text(input.effect, 600, '效果'),
-    evolved: text(input.evolved, 300, '進化效果'), superEvolved: text(input.superEvolved, 300, '超進化效果'),
+  const card = { name: text(input.name, 36, '卡名', true), effect: effectText(input.effect, 600, '效果'),
+    evolved: effectText(input.evolved, 300, '進化效果'), superEvolved: effectText(input.superEvolved, 300, '超進化效果'),
     author: text(input.author, 32, '作者'), craft: integer(input.craft ?? 0, 0, 7, '職業'),
     cost: integer(input.cost ?? 1, 0, 30, '費用'), attack: integer(input.attack ?? 1, 0, 99, '攻擊力'),
     defense: integer(input.defense ?? 1, 0, 99, '生命值'), rarity: integer(input.rarity ?? 4, 1, 4, '稀有度'),

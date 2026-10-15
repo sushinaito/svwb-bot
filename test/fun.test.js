@@ -34,6 +34,11 @@ test('card pool removes tokens, alternate identities, rotated cards and enforces
   assert.equal(cardPool(data, { cost: 3 }).length, 0);
 });
 test('maker maps both website layouts and all effects; validates artwork and numeric fields', () => {
+  const clean = validateCard({ name: '星火幼龍 (DIY)', author: '測試（diy）', effect: '登場：抽1張卡片。\n其他從者登場時，獲得+1/+1。', evolved: '登場 抽1張卡片。' });
+  assert.equal(clean.name, '星火幼龍'); assert.equal(clean.author, '測試');
+  assert.equal(clean.effect, '入場曲：抽1張卡片。\n其他從者登場時，獲得+1/+1。');
+  assert.equal(clean.evolved, '入場曲 抽1張卡片。');
+  assert.equal(validateCard({ name: '英雄登場' }).name, '英雄登場');
   const cfg = makerConfig({ name: '<script>&', effect: '守護。'.repeat(150), evolved: '進化效果', superEvolved: '超進化效果' });
   assert.equal(cfg.name, '<script>&'); assert.equal(cfg.style, 'diy');
   assert.equal(cfg.super_evolve, '超進化效果'); assert.ok(cfg.d1_size < 32.4);

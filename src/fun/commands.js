@@ -13,7 +13,7 @@ export const commands = [
     { type: 3, name: 'type', description: '卡片種類 / Card type', choices: [{ name: '從者', value: 'follower' }, { name: '法術', value: 'spell' }, { name: '護符', value: 'amulet' }] },
     number('cost', '費用 / Cost', 30), number('attack', '攻擊力 / Attack'), number('defense', '生命值 / Defense'), rarity,
     { type: 11, name: 'artwork', description: '立繪：PNG 或 JPG，最大 2 MB / Artwork' },
-    { type: 3, name: 'style', description: '與 WB 製卡器相同的版型 / Layout', choices: [{ name: '效果圖（含卡片效果） / Effect image', value: 'effect' }, { name: '單卡圖（僅卡圖與數值） / Card image', value: 'card' }] },
+    { type: 3, name: 'style', description: '版型 / Layout', choices: [{ name: '效果圖（含卡片效果） / Effect image', value: 'effect' }, { name: '單卡圖（僅卡圖與數值） / Card image', value: 'card' }] },
     { type: 3, name: 'trait', description: '兵種類型 / Trait', max_length: 40 },
     { type: 3, name: 'illustrator', description: '畫師 / Illustrator', max_length: 40 },
     { type: 3, name: 'special', description: '特殊框 / Special frame', choices: [{ name: 'style_101', value: 'style_101' }] }] },

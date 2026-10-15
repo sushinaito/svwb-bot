@@ -17,7 +17,7 @@ function modal(id) {
   const field = (custom_id, label, max_length, required = false, style = 2) => ({ type: 1, components: [{ type: 4, custom_id, label, style, required, max_length }] });
   return { type: 9, data: { custom_id: `svcard:${id}`, title: '製作自訂卡片', components: [
     field('name', '卡片名稱', 36, true, 1), field('effect', '卡片效果', 600),
-    field('evolved', '進化效果（僅從者，可留空）', 300), field('superEvolved', '超進化效果（僅從者，可留空）', 300), field('author', 'DIY 作者（可留空）', 32, false, 1),
+    field('evolved', '進化效果（僅從者，可留空）', 300), field('superEvolved', '超進化效果（僅從者，可留空）', 300), field('author', '作者（可留空）', 32, false, 1),
   ] } };
 }
 export function attachmentURL(raw) {
@@ -94,7 +94,7 @@ export async function handleInteraction(i, env, ctx, render, fetcher = fetch) {
         else {
           card.artwork = await artwork(draft.attachment, fetcher);
           const png = await render(card, env);
-          await editResponse(i, { content: '你的自訂卡片完成了！版型與渲染：[WB 製卡器](https://sva.hypd.asia/maker/)', embeds: [{ title: card.name, image: { url: 'attachment://custom-card.png' }, footer: { text: 'DIY · 非官方卡片' } }] }, png, fetcher);
+          await editResponse(i, { content: '你的自訂卡片完成了！', embeds: [{ title: card.name, image: { url: 'attachment://custom-card.png' }, footer: { text: '自訂卡片' } }] }, png, fetcher);
         }
       } catch (error) {
         console.error('fun_command_failed', { command: i.data?.name || 'make-card', message: String(error.message).slice(0, 200) });

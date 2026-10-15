@@ -6,7 +6,7 @@ export { FunState } from './state.js';
 export function createWorker(render, fetcher = fetch) {
   return { async fetch(request, env, ctx) {
     const path = new URL(request.url).pathname;
-    if (path === '/health' && request.method === 'GET') return json({ ok: true, service: 'svwb-fun', version: 1 });
+    if (path === '/health' && request.method === 'GET') return json({ ok: true, service: 'svwb-fun', version: 2 });
     if (path === '/' && request.method === 'GET') return json({ service: 'SVWB custom cards', render: 'POST /v1/cards/render (Bearer token)', interactions: '/interactions' });
     if (path === '/v1/cards/render') {
       if (!env.RENDER_API_TOKEN || request.headers.get('authorization') !== `Bearer ${env.RENDER_API_TOKEN}`) return json({ error: 'Unauthorized' }, 401);

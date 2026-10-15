@@ -547,7 +547,7 @@ test('deployed conversation capabilities report both feature sets and renderer c
   } }; h.localEnv.FUN_API_TOKEN = 'configured';
   const response = await h.conversation.fetch(new Request('https://conversation/capabilities'));
   const status = await response.json();
-  assert.equal(status.funVersion, 2); assert.equal(status.rendererConfigured, true); assert.equal(status.catalogBatching, true);
+  assert.equal(status.funVersion, 3); assert.equal(status.rendererConfigured, true); assert.equal(status.catalogBatching, true);
   assert.equal(status.rendererAuthenticated, true);
   for (const name of ['read_svwb_source', 'query_svwb_data', 'roll_dice', 'pick_random_card', 'pick_random_craft', 'make_custom_card']) assert.ok(status.tools.includes(name));
   assert.equal(h.calls.length, 0); assert.equal(h.conversation.state.queue.length, 0);

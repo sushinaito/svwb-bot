@@ -13,7 +13,9 @@ const env = { ...config.vars, ...secrets, FUN_API_TOKEN: fun.RENDER_API_TOKEN, D
 const budgetCtx = new FakeContext(), budget = new DailyBudget(budgetCtx, env); await budgetCtx.ready;
 env.BUDGET = { getByName: () => ({ fetch: (url, init) => budget.fetch(new Request(url, init)) }) };
 const ctx = new FakeContext(), conversation = new Conversation(ctx, env); await ctx.ready;
-const posts = [], sessions = new Set(), cases = process.argv.includes('--capability') ? [
+const posts = [], sessions = new Set(), cases = process.argv.includes('--presentation') ? [
+  ['幫我製作一張龍族3費4攻5血傳說 follower，卡名「星火幼龍」，效果是 Fanfare: Draw a card.。整張用官方繁中術語，立繪留空，直接製作效果圖。', 'make_custom_card'],
+] : process.argv.includes('--capability') ? [
   ['你能diy卡牌嗎', null],
   ['那幫我做一張龍族3費4攻5血的傳說從者，叫「星火幼龍」，效果是「入場曲 抽1張卡片。」立繪先留空。', 'make_custom_card'],
 ] : [
@@ -74,6 +76,13 @@ try {
     assert.equal(conversation.state.blocked, undefined);
     assert.equal(conversation.state.sessionId, old.id);
     if (expected) assert.ok(posts.slice(before).some(p => expected === 'roll_dice' ? p.content?.includes('2d20+3') : !!p.embeds?.[0]?.image));
+    if (process.argv.includes('--presentation')) {
+      const card = conversation.state.lastFunCard.card;
+      assert.match(card.effect, /入場曲/);
+      assert.doesNotMatch(card.effect, /登場|戰吼|Fanfare/i);
+      assert.doesNotMatch(JSON.stringify(card), /[（(]\s*DIY\s*[)）]/i);
+      assert.doesNotMatch(JSON.stringify(posts.slice(before)), /WB\s*製卡器|sva\.hypd\.asia|[（(]\s*DIY\s*[)）]/i);
+    }
     if (i === 3) assert.equal(conversation.state.lastFunCard.card.cost, 5);
   }
   console.log(JSON.stringify({ passed: true, costCents: readCost(await claude(env, `/sessions/${old.id}`)), realDiscordPosts: 0 }));
