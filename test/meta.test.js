@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { metaContext } from '../src/chat/meta.js';
 import { userEvent } from '../src/chat/conversation.js';
+import { isStrategyQuestion, strategyResearch } from '../src/chat/strategy.js';
 
 test('latest Dragon lookup uses manifest data and Chinese labels, preserving sample meaning', async () => {
   const calls = [];
@@ -130,4 +131,41 @@ test('cross-class and general meta phrasing route without affecting ordinary dec
     assert.equal(result.strength.status, 'ok'); assert.equal(result.strength.tiers.t1[0].name, '連擊精靈');
   }
   assert.equal(await metaContext('幫我分析我的牌組 y8hf', () => { throw Error('Should not fetch'); }), null);
+});
+
+test('named mulligan questions load the requested archetype with bilingual cards and GameWith search terms', async () => {
+  const f = overviewFixture();
+  f.fixtures['/data/labels.json'].Royal = { 'zh-Hant': '海賊皇', ja: '海賊ロイヤル' };
+  f.fixtures['/api/manifest'].files.cards = 'cards.json';
+  f.fixtures['/data/cards.json'] = { '10921110': { names: { 'zh-Hant': '海域斥候', ja: '海域の斥候' }, cost: 2, skill: { 'zh-Hant': '召喚海賊旗' } } };
+  f.fixtures['/data/Royal.json'].decks[0].cards = [{ cardId: '10921110', count: 3 }];
+  const result = await metaContext('海賊皇怎麼留牌', f.fetcher);
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.strategyTargets, [{ name: '海賊皇', nameJapanese: '海賊ロイヤル' }]);
+  assert.equal(result.archetypes.length, 1);
+  assert.equal(result.archetypes[0].decks[0].cards[0].nameJapanese, '海域の斥候');
+  assert.equal(result.archetypes[0].decks[0].cards[0].quantity, 3);
+  const guidance = strategyResearch('海賊皇怎麼留牌', result);
+  assert.match(guidance.searchQueries[0], /^site:gamewith.jp\/shadowverse-wb\/ 海賊ロイヤル ローテーション マリガン$/);
+  assert.match(userEvent({ text: '海賊皇怎麼留牌', meta: result }).content[0].text, /自行用 web_fetch 開啟正文/);
+  const followup = await metaContext('搜一下gamewith之類的攻略網', f.fetcher, undefined, '目前我讀不到海賊皇的完整牌表');
+  assert.equal(followup.strategyTargets[0].name, '海賊皇');
+  assert.equal(followup.archetypes[0].decks[0].cards[0].name, '海域斥候');
+});
+
+test('less popular named archetypes are not replaced by the two most popular decks', async () => {
+  const f = overviewFixture();
+  f.fixtures['/api/manifest'].files.cards = 'cards.json';
+  f.fixtures['/data/cards.json'] = {};
+  const result = await metaContext('連擊精靈的起手攻略', f.fetcher);
+  assert.equal(result.status, 'ok');
+  assert.equal(result.archetypes[0].name, '連擊精靈');
+  assert.ok(f.calls.includes('/data/Elf.json'));
+  assert.ok(!f.calls.includes('/data/Royal.json'));
+  assert.ok(!f.calls.includes('/data/Dragon.json'));
+  for (const text of ['海賊皇怎麼留牌', '跳費龍怎麼玩', '海賊皇對局攻略', '搜一下gamewith之類的攻略網', 'Pirate Royal mulligan']) assert.ok(isStrategyQuestion(text));
+  assert.equal(strategyResearch('聲優是誰', result), null);
+  const fallback = strategyResearch('這套怎麼留牌', null);
+  assert.match(fallback.searchQueries[0], /gamewith/);
+  assert.match(strategyResearch('無限制海賊皇打法', { format: 'unlimited' }).searchQueries[0], /アンリミテッド/);
 });

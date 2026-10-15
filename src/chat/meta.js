@@ -1,3 +1,4 @@
+import { isStrategyQuestion } from './strategy.js';
 const BASE = 'https://svwbmeta.com';
 const classes = [
   ['Elf', '精靈', /精靈|elf|forestcraft/i], ['Royal', '皇家護衛', /皇家|royal|swordcraft/i],
@@ -34,7 +35,8 @@ export async function readJson(path, fetcher, signal) {
 
 // Read the same public, versioned files used by the site's client. Never
 // interpret a remote manifest entry as a URL or an arbitrary path.
-export async function metaContext(text, fetcher = fetch, diagnose = () => {}) {
+export async function metaContext(text, fetcher = fetch, diagnose = () => {}, referenceText = '') {
+  const strategy = isStrategyQuestion(text);
   const matches = classes.filter(([, , pattern]) => pattern.test(text));
   const current = /這版|本版|版本|賽季|環境|目前|現在|現行|最新|近期|current|latest|this patch|this season/i.test(text);
   const personalAnalysis = /(?:我的|這副|這套|這個).*(?:牌組|牌表)|(?:分析|調整|修改|看看).*(?:牌組|這副牌|這套牌)|deck code|my deck/i.test(text);
@@ -47,7 +49,7 @@ export async function metaContext(text, fetcher = fetch, diagnose = () => {}) {
   const tournamentRequested = /比賽|賽事|賽場|tournament|\b(?:bcl|scl|sto|rage)\b/i.test(text);
   const selected = matches.length === 1 && !/全職業|各職業|所有職業/.test(text) ? matches[0] : null;
   if (!(selected && /牌組|強牌|環境|最新|最近|推薦|deck|meta|latest/i.test(text)) && !overview &&
-      !(tournamentRequested && /牌組|使用|最多|環境|deck|meta/i.test(text))) return null;
+      !(tournamentRequested && /牌組|使用|最多|環境|deck|meta/i.test(text)) && !strategy) return null;
   const format = /無限制|unlimited/i.test(text) ? 'unlimited' : 'rotation';
   const source = BASE + '/deck';
   let stage = 'manifest';
@@ -74,25 +76,32 @@ export async function metaContext(text, fetcher = fetch, diagnose = () => {}) {
     const total = groups.reduce((sum,g) => sum + g.total, 0);
     const ranked = (selected ? [group] : groups).flatMap(g => g.archetypes.map(a => ({ ...a, classKey: g.class, classTotal: g.total })))
       .sort((a,b) => b.builds - a.builds);
-    const chosen = ranked.slice(0, 2);
+    const labels = await file('archetypes');
+    const matchArchetypes = query => ranked.filter(a => [a.name, ...Object.values(labels[a.name] || {})]
+      .some(name => typeof name === 'string' && name.length >= 3 && String(query).normalize('NFKC').toLowerCase().includes(name.normalize('NFKC').toLowerCase())));
+    let requested = matchArchetypes(text);
+    if (!requested.length && strategy && !matches.length && /gamewith|game8|^(?:這|这|那套|它)/i.test(text)) requested = matchArchetypes(referenceText);
+    const chosen = (requested.length ? requested : ranked).slice(0, 2);
     stage = 'details';
-    const [labels, cardData, ...details] = await Promise.all([
-      file('archetypes'), selected ? file('cards') : Promise.resolve({}),
+    const includeCards = Boolean(selected || (strategy && requested.length));
+    const [cardData, ...details] = await Promise.all([
+      includeCards ? file('cards') : Promise.resolve({}),
       ...chosen.map(a => file(`archdeck.${format}.${a.id}`).catch(() => ({ decks: [] }))),
     ]);
     const className = key => classes.find(([id]) => id === key)?.[1];
-    const archetypes = (selected ? chosen : ranked).map((a, index) => ({
+    const detailById = new Map(chosen.map((a, i) => [a.id, details[i]]));
+    const archetypes = (selected || (strategy && requested.length) ? chosen : ranked).map(a => ({
       name: plain(labels[a.name]?.['zh-Hant'] || a.name, 100), className: className(a.classKey), sampledBuilds: a.builds,
       shareWithinClassPct: a.classTotal ? 100 * a.builds / a.classTotal : 0,
       ...(!selected ? { shareOfAllSampledBuildsPct: total ? 100 * a.builds / total : 0 } : {}),
-      decks: (details[index]?.decks || []).slice(0, 1).map(deck => ({
+      decks: (detailById.get(a.id)?.decks || []).slice(0, 1).map(deck => ({
         postedAt: plain(deck.postedAt, 40), timestampTimezone: '來源未註明',
         source: safeLink(deck.tweetUrl, ['x.com', 'twitter.com']),
         deckUrl: safeLink(deck.deckUrl, ['shadowverse-wb.com']),
-        ...(selected ? { cards: (deck.cards || []).slice(0, 60).map(entry => {
+        ...(includeCards ? { cards: (deck.cards || []).slice(0, 60).map(entry => {
           const card = cardData[entry.cardId];
           if (!card || !Number.isInteger(entry.count) || entry.count < 1 || entry.count > 3) throw Error('Invalid card');
-          return { name: plain(card.names?.['zh-Hant'] || '繁中卡名尚未確認', 100), quantity: entry.count,
+          return { name: plain(card.names?.['zh-Hant'] || '繁中卡名尚未確認', 100), nameJapanese: plain(card.names?.ja, 100), quantity: entry.count,
             cost: card.cost, text: plain(card.skill?.['zh-Hant']) };
         }) } : {}),
       })),
@@ -109,6 +118,9 @@ export async function metaContext(text, fetcher = fetch, diagnose = () => {}) {
         caveat: '這是目前讀取到的 SVWB Meta 網站強度評級，不是賽事或排位使用率，也不是勝率。builtAt 是資料建置時間，不等於評級修改日期。' };
     } catch { strength = { status: 'unavailable', message: '本次強度榜未讀取成功；不能單憑樣本數宣稱最強。' }; }
     return { status: 'ok', source, retrievedAt: new Date().toISOString(), builtAt: manifest.builtAt,
+      ...(strategy ? { strategyTargets: requested.map(a => ({ name: plain(labels[a.name]?.['zh-Hant'] || a.name, 100),
+        nameJapanese: plain(labels[a.name]?.ja || a.name.replace(/[A-Za-z]+$/, { Elf: 'エルフ', Royal: 'ロイヤル', Witch: 'ウィッチ', Dragon: 'ドラゴン', Nightmare: 'ナイトメア', Bishop: 'ビショップ', Nemesis: 'ネメシス' }[a.classKey] || ''), 100) })),
+        strategyCaveat: '牌表是公開催錄樣本，並非已查到攻略。留牌與打法仍須搜尋攻略網站，核對不同構築。' } : {}),
       format, scope: selected ? 'single_class' : 'all_classes', className: selected?.[1], window: summary.window,
       ...(selected ? { sampledClassBuilds: group.total } : { sampledBuilds: total,
         unclassifiedSampledBuilds: total - ranked.reduce((sum,a) => sum + a.builds, 0),

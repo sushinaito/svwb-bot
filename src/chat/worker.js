@@ -3,6 +3,7 @@ import { metaContext } from './meta.js';
 import { deckPictures, fetchDeckPicture } from './pictures.js';
 import { imageBlock } from './vision.js';
 import { cardContext } from './cards.js';
+import { guideContext } from './guides.js';
 export { DiscordGateway } from './gateway.js';
 export { Conversation } from './conversation.js';
 export { DailyBudget } from './budget.js';
@@ -28,6 +29,8 @@ export default {
       const result = await metaContext('最近最強的龍族牌組有啥', fetch, d => { diagnostic = d; });
       const overview = await metaContext('現在比賽和排位最多人用的牌組是？');
       const card = await cardContext('芭芭蘿絲的聲優是誰？');
+      const strategy = await metaContext('海賊皇怎麼留牌');
+      const guide = await guideContext('海賊皇怎麼留牌', strategy);
       const picture = deckPictures({ meta: result }, result.archetypes?.[0]?.name || '')[0];
       let image = { status: 'unavailable' };
       if (picture) {
@@ -39,6 +42,8 @@ export default {
         catch { image = { status: 'unavailable' }; }
       }
       return json({ status: result.status, diagnostic, window: result.window, archetypes: result.archetypes?.map(a => a.name), image, card,
+        strategy: { status: strategy?.status, targets: strategy?.strategyTargets, totalCards: strategy?.archetypes?.[0]?.decks?.[0]?.cards?.reduce((n,c) => n + c.quantity, 0),
+          guide: { status: guide?.status, source: guide?.guides?.[0]?.source, updatedAt: guide?.guides?.[0]?.updatedAt, sections: guide?.guides?.[0]?.sections?.map(s => s.heading) } },
         overview: { status: overview?.status, scope: overview?.scope, sampledBuilds: overview?.sampledBuilds,
           classCount: overview?.classes?.length, topArchetypes: overview?.archetypes?.slice(0, 3).map(a => ({ name: a.name, sampledBuilds: a.sampledBuilds })),
           tournament: overview?.tournament, strength: overview?.strength } });

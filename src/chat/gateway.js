@@ -33,6 +33,7 @@ export class DiscordGateway {
       directRepliesSupported: true,
       deckPicturesSupported: true,
       officialCardLookupSupported: true,
+      strategyGuidesSupported: true,
       imageInput: { supported: true, maxImages: 2, maxBytesPerImage: 5242880, formats: ['png','jpeg','webp','gif'] },
       chineseOutputGuard: true,
       contextCompaction: { thresholdTokens: Number(this.env.CONTEXT_COMPACT_TOKENS || 80000), idleMinutes: 30 },

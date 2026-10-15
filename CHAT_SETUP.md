@@ -208,6 +208,20 @@ Cloudflare stores the conversation queue and routing metadata. Claude stores eac
 conversation's transcript. A conversation reset deletes its Claude session.
 
 References:
+- Strategy questions (mulligans, opening hands, matchups and play patterns) prefer
+  GameWith's SVWB guides, with Game8 as an additional research source. Named
+  archetypes load their own current sample deck and Japanese/Traditional Chinese
+  card-name mappings, including less popular archetypes. Applicable reply follow-ups
+  can recover the archetype from the quoted bot message.
+  The Worker discovers matching GameWith article links from its public index and
+  directly reads the requested article sections, with format/title validation,
+  update dates, 2 MiB response limits and a five-minute cache. It sends only relevant
+  text to the model. No article IDs or fixed mulligan advice are hardcoded.
+  If direct reading fails or the needed section is missing, the model continues
+  web search/fetch instead of asking the user to read the page. Guidance requires
+  concrete sourced conclusions, uncertainty scoped to actual gaps, and a clear
+  distinction between guide recommendations and inference. A disposable live check
+  is available as `node --env-file=.env.txt scripts/smoke-strategy.js [agent-version]`.
 - An explicit owner-requested quota reset can be performed with
   `node scripts/chat-admin.js budget-reset [unique-request-id]`. This authenticated
   POST resets today's accounted allowance only, preserving open reservations,

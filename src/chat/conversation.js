@@ -2,6 +2,8 @@ import { claude, discord, json, sendText, messageText } from './api.js';
 import { deckContext } from './decks.js';
 import { metaContext } from './meta.js';
 import { cardContext } from './cards.js';
+import { guideContext } from './guides.js';
+import { STRATEGY_GUIDANCE, RESEARCH_COMPLETION_GUIDANCE, strategyResearch } from './strategy.js';
 import { needsChineseRewrite, rewriteEvent } from './language.js';
 import { compactionThreshold, requestContextTokens, summaryEvent } from './context.js';
 import { sendDeckPictures } from './pictures.js';
@@ -11,6 +13,9 @@ import preferredSources from '../../claude/sources.json' with { type: 'json' };
 const cap = cents => ({ type: 'limit', max_list_cost: { amount: String(cents), currency: 'USD' } });
 const META_REPLY_GUIDANCE = '資料回答規則：本輪 svwbmeta_lookup.status=ok 代表這次程式已讀取成功，以本輪資料取代先前讀取失敗的描述。scope=all_classes 已包含全職業，不要要求先指定職業，也不要再次讀取同一個動態網頁。詢問比賽與排位時分開回答：tournament.status=ok 就列出該場名稱、日期、前幾個牌型及牌表份數占比，並說明只是該場；排位全服使用率若 unavailable，簡短說無法確認全服第一，但仍提供全職業社群樣本最多的牌型、樣本數及日期作參考；報社群百分比時也寫明全部 sampledBuilds 份這個分母。不要把樣本占比、賽事牌表占比、玩家占比或勝率混在一起，不要因缺少全服排位統計而拒絕回答已有的賽事與社群資料。先給可用結論，不敘述搜尋過程。\n';
 export const userEvent = input => ({ type: 'user.message', content: [{ type: 'text', text:
+  '已讀攻略優先：guide_lookup.status=ok 表示程式已從 GameWith 索引找到文章並讀取實際正文段落。直接用 guides.sections 回答，不必再搜尋／重讀同篇文章，不能假稱只讀到摘要或要求使用者自行開啟。這是下列攻略搜尋流程的已完成結果；只有缺少所需段落、不同對局或 missingTargets 時才補查。先把正文的具體卡名、條件與理由用繁中整理，附 source、updatedAt，額外判斷明確標示。\n' +
+  (input.guides?.status === 'ok' ? '' : STRATEGY_GUIDANCE) +
+  RESEARCH_COMPLETION_GUIDANCE +
   '卡片查證：card_lookup.cards 中 verification=official 的欄位是本輪直接取得的官方卡片資料；以它修正先前不確定或錯誤的回答。聲優看 voiceActorJapanese，不要再次搜尋其他作品的相似角色名或要求已辨識的完整卡名。明確回答並附該卡 source 連結。候選多張時說明分別是哪張，缺少或未核實的欄位不能猜；造型配音和卡片基本配音分開。matchedFrom 表示卡名來自本訊息、引用訊息或近期對話，若使用者換話題不能強行沿用。\n' +
   '看圖作答要區分畫面直接標示的數字與你自行計數。若只讀到統計欄，就說統計欄的結果；除非確實逐一辨識，不能額外宣稱已核對每張牌、幾種卡或逐卡合計。\n' +
   '強度建議：svwbmeta_lookup.strength.status=ok 時，已讀到網站目前的強度榜；依 tiers 回答這版適合玩什麼等問題，註明是網站評級，不能拿樣本最多當作最強。不要再說牌組頁或 tier 頁讀不到，也不要用幾個月前的新聞替代本輪資料。若問運氣、操作難度或某位玩家適合什麼，區分個人判斷與可查證的卡效；不要捏造人物偏好或勝率。\n' +
@@ -28,6 +33,9 @@ export const userEvent = input => ({ type: 'user.message', content: [{ type: 'te
   ...(input.decks?.length ? { official_deck_lookup: input.decks } : {}),
   ...(input.meta ? { svwbmeta_lookup: input.meta } : {}),
   ...(input.cards ? { card_lookup: input.cards } : {}),
+  ...(input.guides ? { guide_lookup: input.guides } : {}),
+  ...(strategyResearch(input.text, input.meta) ? { strategy_research: { ...strategyResearch(input.text, input.meta),
+    required: input.guides?.status !== 'ok', ...(input.guides?.status === 'ok' ? { completedBy: 'guide_lookup' } : {}) } } : {}),
   ...(input.memory ? { previous_conversation_summary: input.memory } : {}),
 }) }] });
 
@@ -152,7 +160,8 @@ export class Conversation {
 
     if (job.phase === 'prepare') {
       if (!job.input.decks) job.input.decks = await deckContext(job.input.text);
-      if (job.input.meta === undefined) job.input.meta = await metaContext(job.input.text);
+      if (job.input.meta === undefined) job.input.meta = await metaContext(job.input.text, fetch, undefined, job.input.replyContext?.text || job.input.referencedContext?.text);
+      if (job.input.guides === undefined) job.input.guides = await guideContext(job.input.text, job.input.meta);
       await this.enrichCards(job.input);
       if (this.state.sessionId) {
         const session = await claude(this.env, `/sessions/${this.state.sessionId}`);
@@ -232,7 +241,8 @@ export class Conversation {
 
     if (job.phase === 'send') {
       if (!job.input.decks) job.input.decks = await deckContext(job.input.text);
-      if (job.input.meta === undefined) job.input.meta = await metaContext(job.input.text);
+      if (job.input.meta === undefined) job.input.meta = await metaContext(job.input.text, fetch, undefined, job.input.replyContext?.text || job.input.referencedContext?.text);
+      if (job.input.guides === undefined) job.input.guides = await guideContext(job.input.text, job.input.meta);
       await this.enrichCards(job.input);
       let imageBlocks = [];
       if (!job.compacting && !job.repairAttempted && !job.imagesRejected && job.input.images?.length) {
