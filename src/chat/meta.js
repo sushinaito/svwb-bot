@@ -91,7 +91,7 @@ export async function metaContext(text, fetcher = fetch, diagnose = () => {}, re
     const className = key => classes.find(([id]) => id === key)?.[1];
     const detailById = new Map(chosen.map((a, i) => [a.id, details[i]]));
     const archetypes = (selected || (strategy && requested.length) ? chosen : ranked).map(a => ({
-      name: plain(labels[a.name]?.['zh-Hant'] || a.name, 100), className: className(a.classKey), sampledBuilds: a.builds,
+      name: plain(labels[a.name]?.['zh-Hant'] || a.name, 100), nameJapanese: plain(labels[a.name]?.ja || a.name,100), className: className(a.classKey), sampledBuilds: a.builds,
       shareWithinClassPct: a.classTotal ? 100 * a.builds / a.classTotal : 0,
       ...(!selected ? { shareOfAllSampledBuildsPct: total ? 100 * a.builds / total : 0 } : {}),
       decks: (detailById.get(a.id)?.decks || []).slice(0, 1).map(deck => ({

@@ -79,17 +79,27 @@ export function splitMessage(text, limit = 1900) {
   return chunks;
 }
 
-export async function sendText(env, channelId, text, nonceSeed, replyTo) {
+export async function sendText(env, channelId, text, nonceSeed, replyTo, editFirstMessageId) {
   const chunks = splitMessage(text);
+  const messages = [];
   for (let i = 0; i < chunks.length; i++) {
+    if (i === 0 && editFirstMessageId) {
+      try {
+        messages.push(await discord(env, `/channels/${channelId}/messages/${editFirstMessageId}`, 'PATCH', {
+          content: chunks[i], allowed_mentions: { parse: [], replied_user: false }, flags: 4,
+        }));
+        continue;
+      } catch (error) { if (error.status !== 404) throw error; }
+    }
     const nonce = await messageNonce(`${nonceSeed}:${i}`);
-    await discord(env, `/channels/${channelId}/messages`, 'POST', {
+    messages.push(await discord(env, `/channels/${channelId}/messages`, 'POST', {
       content: chunks[i], allowed_mentions: { parse: [], replied_user: false },
       nonce, enforce_nonce: true,
       flags: 4,
       ...(i === 0 && replyTo ? { message_reference: { message_id: replyTo, fail_if_not_exists: false } } : {}),
-    });
+    }));
   }
+  return messages;
 }
 
 export async function messageNonce(seed) {

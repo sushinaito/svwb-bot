@@ -78,6 +78,14 @@ test('delivery chooses only the exact linked build and retains tool-result card 
     [{ label: '精靈・節奏進化妖', deckUrl: url }]);
 });
 
+test('three recommended builds survive a missing Markdown closer before Chinese punctuation',()=>{
+  const urls=[url,url.replace('1.1.','1.2.'),url.replace('1.1.','1.4.')];
+  const answer=localizeDeckLinks(`[牌一](${urls[0]})\n（[牌二](${urls[1]}）\n[牌三](${urls[2]})`);
+  assert.ok(!answer.includes('/ja/'));
+  assert.match(answer,/\)）/);
+  assert.equal(deckPictures({},answer).length,3);
+});
+
 test('guide deck links survive final-writer evidence truncation with their source identity', () => {
   const source = 'https://gamewith.jp/shadowverse-wb/507802';
   const deliveryDecks = collectDeliveryDecks({ status: 'ok', source, text: '正文'.repeat(10000),

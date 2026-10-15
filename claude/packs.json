@@ -1,0 +1,190 @@
+{
+  "schemaVersion": 1,
+  "verifiedAt": "2026-10-15T11:13:55.204Z",
+  "coverage": "Nine released card packs as of verification; basic cards are a separate set, not pack 0. Names/IDs/card counts from the official catalog; release dates retain field-level provenance.",
+  "sources": {
+    "officialDirectory": "https://shadowverse-wb.com/cht/cards/",
+    "officialPackConfiguration": "https://shadowverse-wb.com/assets/_app/immutable/chunks/qJc8EhfT.js",
+    "officialCardCatalog": "https://shadowverse-wb.com/web/CardList/cardList",
+    "communityTimeline": "https://onjshadowverse-worlds-beyond.game-info.wiki/d/%A5%AB%A1%BC%A5%C9%A5%D1%A5%C3%A5%AF%B0%EC%CD%F7",
+    "communityUpdatedAt": "2026-09-03T20:17:04+09:00",
+    "game8Directory": "https://game8.jp/shadowverse-beyond/763295"
+  },
+  "sourceCautions": [
+    {
+      "source": "https://game8.jp/shadowverse-beyond/763295",
+      "issue": "The page labels Revenants of Azvaldt as pack 8 in one paragraph; official records identify it as pack 9. Its next-pack paragraph still predicts pack 9 for late August although that pack was released on 2026-08-27. Do not treat the page modification date as proof every paragraph is current."
+    }
+  ],
+  "basicSet": {
+    "id": 10000,
+    "name": "基本卡",
+    "cardCount": 56
+  },
+  "packs": [
+    {
+      "id": 10001,
+      "ordinal": 1,
+      "names": {
+        "cht": "傳說揭幕",
+        "ja": "伝説の幕開け",
+        "en": "Legends Rise"
+      },
+      "releasedOn": "2025-06-17",
+      "releaseDateEvidence": {
+        "verification": "community_reported",
+        "source": "https://onjshadowverse-worlds-beyond.game-info.wiki/d/%A5%AB%A1%BC%A5%C9%A5%D1%A5%C3%A5%AF%B0%EC%CD%F7"
+      },
+      "cardCount": 142,
+      "cardCountAsOf": "2026-10-15T10:55:09.039Z",
+      "officialPage": "https://shadowverse-wb.com/cht/cards/pack/legends-rise/",
+      "nameAndIdVerification": "official"
+    },
+    {
+      "id": 10002,
+      "ordinal": 2,
+      "names": {
+        "cht": "無限進化",
+        "ja": "インフィニティ・エボルヴ",
+        "en": "Infinity Evolved"
+      },
+      "releasedOn": "2025-07-17",
+      "releaseDateEvidence": {
+        "verification": "official_corroborated",
+        "source": "https://campaign.shadowverse-wb.com/en/evolve-card/",
+        "supportingSource": "https://onjshadowverse-worlds-beyond.game-info.wiki/d/%A5%AB%A1%BC%A5%C9%A5%D1%A5%C3%A5%AF%B0%EC%CD%F7"
+      },
+      "cardCount": 77,
+      "cardCountAsOf": "2026-10-15T10:55:09.039Z",
+      "officialPage": "https://shadowverse-wb.com/cht/cards/pack/infinity-evolved/",
+      "nameAndIdVerification": "official"
+    },
+    {
+      "id": 10003,
+      "ordinal": 3,
+      "names": {
+        "cht": "絕傑的繼承者",
+        "ja": "絶傑の継承者",
+        "en": "Heirs of the Omen"
+      },
+      "releasedOn": "2025-08-28",
+      "releaseDateEvidence": {
+        "verification": "community_reported",
+        "source": "https://onjshadowverse-worlds-beyond.game-info.wiki/d/%A5%AB%A1%BC%A5%C9%A5%D1%A5%C3%A5%AF%B0%EC%CD%F7"
+      },
+      "cardCount": 77,
+      "cardCountAsOf": "2026-10-15T10:55:09.039Z",
+      "officialPage": "https://shadowverse-wb.com/cht/cards/pack/heirs-of-the-omen/",
+      "nameAndIdVerification": "official"
+    },
+    {
+      "id": 10004,
+      "ordinal": 4,
+      "names": {
+        "cht": "蒼空六龍",
+        "ja": "蒼空の六竜",
+        "en": "Skybound Dragons"
+      },
+      "releasedOn": "2025-10-29",
+      "releaseDateEvidence": {
+        "verification": "community_reported",
+        "source": "https://onjshadowverse-worlds-beyond.game-info.wiki/d/%A5%AB%A1%BC%A5%C9%A5%D1%A5%C3%A5%AF%B0%EC%CD%F7"
+      },
+      "cardCount": 76,
+      "cardCountAsOf": "2026-10-15T10:55:09.039Z",
+      "officialPage": "https://shadowverse-wb.com/cht/cards/pack/skybound-dragons/",
+      "nameAndIdVerification": "official"
+    },
+    {
+      "id": 10005,
+      "ordinal": 5,
+      "names": {
+        "cht": "花醉遊戲",
+        "ja": "花酔遊戯",
+        "en": "Blossoming Fate"
+      },
+      "releasedOn": "2025-12-29",
+      "releaseDateEvidence": {
+        "verification": "community_reported",
+        "source": "https://onjshadowverse-worlds-beyond.game-info.wiki/d/%A5%AB%A1%BC%A5%C9%A5%D1%A5%C3%A5%AF%B0%EC%CD%F7"
+      },
+      "cardCount": 76,
+      "cardCountAsOf": "2026-10-15T10:55:09.039Z",
+      "officialPage": "https://shadowverse-wb.com/cht/cards/pack/blossoming-fate/",
+      "nameAndIdVerification": "official"
+    },
+    {
+      "id": 10006,
+      "ordinal": 6,
+      "names": {
+        "cht": "天啟盟約",
+        "ja": "アポカリプス・パクト",
+        "en": "Apocalypse Pact"
+      },
+      "releasedOn": "2026-02-26",
+      "releaseDateEvidence": {
+        "verification": "community_reported",
+        "source": "https://onjshadowverse-worlds-beyond.game-info.wiki/d/%A5%AB%A1%BC%A5%C9%A5%D1%A5%C3%A5%AF%B0%EC%CD%F7"
+      },
+      "cardCount": 76,
+      "cardCountAsOf": "2026-10-15T10:55:09.039Z",
+      "officialPage": "https://shadowverse-wb.com/cht/cards/pack/apocalypse-pact/",
+      "nameAndIdVerification": "official"
+    },
+    {
+      "id": 10007,
+      "ordinal": 7,
+      "names": {
+        "cht": "誅神弒滅者",
+        "ja": "神殺し・アナテマ",
+        "en": "Anathema's Gambit"
+      },
+      "releasedOn": "2026-04-28",
+      "releaseDateEvidence": {
+        "verification": "community_reported",
+        "source": "https://onjshadowverse-worlds-beyond.game-info.wiki/d/%A5%AB%A1%BC%A5%C9%A5%D1%A5%C3%A5%AF%B0%EC%CD%F7"
+      },
+      "cardCount": 77,
+      "cardCountAsOf": "2026-10-15T10:55:09.039Z",
+      "officialPage": "https://shadowverse-wb.com/cht/cards/pack/anathemas-gambit/",
+      "nameAndIdVerification": "official"
+    },
+    {
+      "id": 10008,
+      "ordinal": 8,
+      "names": {
+        "cht": "命運典錄",
+        "ja": "クロニクル・オブ・デスティニー",
+        "en": "Chronicle of Destiny"
+      },
+      "releasedOn": "2026-06-29",
+      "releaseDateEvidence": {
+        "verification": "community_reported",
+        "source": "https://onjshadowverse-worlds-beyond.game-info.wiki/d/%A5%AB%A1%BC%A5%C9%A5%D1%A5%C3%A5%AF%B0%EC%CD%F7"
+      },
+      "cardCount": 78,
+      "cardCountAsOf": "2026-10-15T10:55:09.039Z",
+      "officialPage": "https://shadowverse-wb.com/cht/cards/pack/chronicle-of-destiny/",
+      "nameAndIdVerification": "official"
+    },
+    {
+      "id": 10009,
+      "ordinal": 9,
+      "names": {
+        "cht": "阿茲弗特‧破咒再臨",
+        "ja": "アズヴォルト・レヴナント",
+        "en": "Revenants of Azvaldt"
+      },
+      "releasedOn": "2026-08-27",
+      "releaseDateEvidence": {
+        "verification": "official_corroborated",
+        "source": "https://revenants-of-azvaldt.shadowverse-wb.com/cht/",
+        "supportingSource": "https://onjshadowverse-worlds-beyond.game-info.wiki/d/%A5%AB%A1%BC%A5%C9%A5%D1%A5%C3%A5%AF%B0%EC%CD%F7"
+      },
+      "cardCount": 76,
+      "cardCountAsOf": "2026-10-15T10:55:09.039Z",
+      "officialPage": "https://shadowverse-wb.com/cht/cards/pack/revenants-of-azvaldt/",
+      "nameAndIdVerification": "official"
+    }
+  ]
+}

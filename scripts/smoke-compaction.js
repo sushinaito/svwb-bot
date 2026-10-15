@@ -4,14 +4,22 @@ import { DailyBudget, budgetStatus } from '../src/chat/budget.js';
 import { claude } from '../src/chat/api.js';
 import { FakeContext, input } from '../test/helpers.js';
 const setup = JSON.parse(await readFile('.chat-setup.json', 'utf8'));
-const nativeFetch = globalThis.fetch, replies = [], sessions = [];
+const nativeFetch = globalThis.fetch, replies = [], sessions = [], finalIndexes = new Map();
+let discordSequence=0;
 // Exercise the real conversation state machine and Claude API. Discord delivery
 // is replaced locally, so no channel receives these test messages.
 globalThis.fetch = async (raw, init = {}) => {
   const url = new URL(raw);
   if (url.hostname === 'discord.com') {
-    if (url.pathname.endsWith('/messages')) replies.push(JSON.parse(init.body).content);
-    return Response.json({ id: 'test-delivery' });
+    const id=init.method==='PATCH' ? url.pathname.split('/').at(-1) : `test-${++discordSequence}`;
+    if(init.body) {
+      const content=JSON.parse(init.body).content;
+      if(content && content!=='收到，我先看看。' && !content.startsWith('處理中｜')) {
+        if(finalIndexes.has(id)) replies[finalIndexes.get(id)]=content;
+        else { finalIndexes.set(id,replies.length); replies.push(content); }
+      }
+    }
+    return Response.json({ id });
   }
   const response = await nativeFetch(raw, init);
   if (url.hostname === 'api.anthropic.com' && url.pathname === '/v1/sessions' && init.method === 'POST' && response.ok) {

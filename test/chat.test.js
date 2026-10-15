@@ -146,7 +146,8 @@ async function harness(t, answers = [], options = {}) {
   const ctx = new FakeContext();
   const conversation = new Conversation(ctx, localEnv);
   await ctx.ready;
-  const calls = [], replies = [], events = [];
+  const calls = [], replies = [], events = [], finalIndexes = new Map();
+  let discordSequence = 0;
   let sequence = 0, usage = 0, autoAnswer = true, sessionCount = 0, sessionBudget, sessionTools = [{ type: 'agent_toolset_20260401' }], resumeRunning = false, completion;
   const stamp = () => `2026-10-15T05:00:${String(++sequence).padStart(2, '0')}.000Z`;
   t.mock.method(globalThis, 'fetch', async (raw, init = {}) => {
@@ -155,8 +156,12 @@ async function harness(t, answers = [], options = {}) {
     if (url.hostname === 'gamewith.jp') return new Response('<main><h1>規則說明</h1><p>' + '規則正文。'.repeat(40) + '</p></main>', { headers: { 'Content-Type': 'text/html' } });
     if (url.hostname === 'cdn.discordapp.com') return new Response(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC','base64'), { headers: { 'Content-Type': 'image/png' } });
     if (url.hostname === 'discord.com') {
-      if (url.pathname.endsWith('/messages')) replies.push(body.content);
-      return Response.json({ id: `reply_${replies.length}` });
+      const id = init.method === 'PATCH' ? url.pathname.split('/').at(-1) : `discord_${++discordSequence}`;
+      if (body?.content && !['收到，我先看看。', '收到，前一則處理完就接著看這則。'].includes(body.content) && !body.content.startsWith('處理中｜')) {
+        if (finalIndexes.has(id)) replies[finalIndexes.get(id)] = body.content;
+        else { finalIndexes.set(id, replies.length); replies.push(body.content); }
+      }
+      return Response.json({ id });
     }
     if (url.pathname === '/v1/sessions' && init.method === 'POST') {
       if (body.agent.type === 'agent_with_overrides' && body.agent.tools?.length === 0) {
@@ -251,6 +256,77 @@ test('two conversational turns reuse the pinned agent session and never replay o
   assert.equal(budgetStatus(h.budget.state, env).reservedCents, 0);
   await h.enqueue(input('m2'));
   assert.equal(h.conversation.state.queue.length, 0);
+});
+
+test('accepted messages acknowledge before research and survive restart without another placeholder', async t => {
+  const h = await harness(t, ['完整答案']);
+  await h.enqueue(input('early'));
+  assert.ok(!h.calls.some(c => c.path.startsWith('/v1/sessions')));
+  assert.equal(h.calls[0].body.content, '收到，我先看看。');
+  const saved = await h.ctx.storage.get('conversation');
+  assert.ok(saved.queue[0].progressMessageId);
+  await h.enqueue(input('early'));
+  assert.equal(h.calls.filter(c => c.path.endsWith('/messages')).length,1);
+  const restarted = new Conversation(h.ctx,h.localEnv); await h.ctx.ready; await restarted.alarm();
+  assert.equal(h.calls.filter(c => c.path.endsWith('/messages')).length,1);
+  assert.equal(h.calls.filter(c => c.method === 'PATCH').at(-1).path, '/api/v10/channels/456/messages/'+saved.queue[0].progressMessageId);
+  assert.deepEqual(h.replies,['完整答案']);
+});
+
+test('useful interim findings edit the same message, coalesce rapid updates and keep final answers separate', async t => {
+  const h=await harness(t); h.setAutoAnswer(false);
+  await h.enqueue(input('progress')); await h.conversation.alarm();
+  h.events.push({id:'progress-tool',type:'agent.custom_tool_use',name:'report_svwb_progress',input:{message:'已確認卡包範圍，正在核對完整名單。'},processed_at:'2026-10-15T05:01:00Z'},
+    {id:'progress-wait',type:'session.status_idle',stop_reason:{type:'requires_action',event_ids:['progress-tool']},processed_at:'2026-10-15T05:01:01Z'});
+  await h.conversation.alarm();
+  let edits=h.calls.filter(c=>c.method==='PATCH');
+  assert.equal(edits.length,1); assert.match(edits[0].body.content,/處理中｜已確認卡包範圍/);
+  assert.deepEqual(h.replies,[]); assert.equal(h.conversation.state.current.phase,'poll');
+  await h.conversation.progress('已核對一半。'); await h.conversation.progress('已核對全部，正在整理。');
+  assert.equal(h.calls.filter(c=>c.method==='PATCH').length,1);
+  h.conversation.state.current.progressAt=Date.now()-16000; await h.conversation.save();
+  const restarted=new Conversation(h.ctx,h.localEnv); await h.ctx.ready; await restarted.alarm();
+  edits=h.calls.filter(c=>c.method==='PATCH'); assert.equal(edits.length,2); assert.match(edits[1].body.content,/已核對全部/);
+  h.events.push({id:'final-progress',type:'agent.message',content:[{type:'text',text:'完整正式答案。'}],processed_at:'2026-10-15T05:02:00Z'},
+    {id:'done-progress',type:'session.status_idle',stop_reason:{type:'end_turn'},processed_at:'2026-10-15T05:02:01Z'});
+  await restarted.alarm();
+  assert.deepEqual(h.replies,['完整正式答案。']);
+  assert.equal(new Set(h.calls.filter(c=>c.method==='PATCH').map(c=>c.path)).size,1);
+  assert.equal(h.calls.filter(c=>c.path.endsWith('/messages')).length,1);
+});
+
+test('deleted progress messages fall back to a final POST and long answers keep every chunk', async t => {
+  const calls=[];
+  t.mock.method(globalThis,'fetch',async(url,init)=>{
+    calls.push({url,method:init.method,body:JSON.parse(init.body)});
+    return init.method==='PATCH' ? new Response(null,{status:404}) : Response.json({id:'final'});
+  });
+  const text='正式答案'.repeat(1000);
+  await sendText(env,'456',text,'answer','user-message','deleted-progress');
+  assert.equal(calls[0].method,'PATCH');
+  const posts=calls.filter(c=>c.method==='POST');
+  assert.equal(posts.map(c=>c.body.content).join(''),text);
+  assert.ok(posts.every(c=>c.body.enforce_nonce && !c.body.allowed_mentions.parse.length));
+  assert.equal(posts[0].body.message_reference.message_id,'user-message');
+});
+
+test('budget denial replaces the acknowledgement', async t => {
+  const h=await harness(t); h.budget.state.days[jstDay()]=190;
+  await h.enqueue(input('denied')); await h.conversation.alarm();
+  assert.equal(h.calls.filter(c=>c.path.endsWith('/messages')).length,1);
+  assert.match(h.calls.find(c=>c.method==='PATCH').body.content,/AI 預算/);
+  assert.equal(h.conversation.state.current,null);
+});
+
+test('a failed acknowledgement retries with its stable nonce and does not stop generation', async t => {
+  const h=await harness(t,['已完成']);
+  const original=globalThis.fetch; let failed=false;
+  t.mock.method(globalThis,'fetch',async(raw,init)=>{
+    if(!failed && String(raw).endsWith('/messages')) { failed=true;throw Error('Lost acknowledgement response'); }
+    return original(raw,init);
+  });
+  await h.enqueue(input('retry-ack'));assert.equal(h.conversation.state.queue[0].progressMessageId,undefined);
+  await h.conversation.alarm();assert.deepEqual(h.replies,['已完成']);assert.equal(h.conversation.state.blocked,undefined);
 });
 
 const imageInput = () => ({ images: [{ id: '111', messageId: 'm1', channelId: '456', filename: 'deck.png',
@@ -496,7 +572,7 @@ test('agent spec pins Haiku 5.5 and only enables web tools', async () => {
   assert.equal(spec.model.effort.type, 'high');
   assert.equal(spec.tools[0].default_config.enabled, false);
   assert.deepEqual(spec.tools[0].configs.map(c => c.name), ['web_search', 'web_fetch']);
-  assert.deepEqual(spec.tools.slice(1).map(c => c.name), ['read_svwb_source', 'query_svwb_data']);
+  assert.deepEqual(spec.tools.slice(1).map(c => c.name), ['read_svwb_source', 'query_svwb_data', 'report_svwb_progress']);
   assert.equal(spec.multiagent, undefined);
 });
 
@@ -535,7 +611,7 @@ test('existing conversations receive new tools without replacing their session o
   assert.ok(update.body.agent.tools.some(t => t.name === 'read_svwb_source'));
   assert.ok(update.body.agent.tools.some(t => t.name === 'roll_dice'));
   assert.ok(update.body.agent.tools.some(t => t.name === 'make_custom_card'));
-  assert.equal(h.conversation.state.researchToolsVersion, 4);
+  assert.equal(h.conversation.state.researchToolsVersion, 5);
   assert.ok(update.body.agent.tools.find(t => t.name === 'query_svwb_data').input_schema.properties.resource.enum.includes('terminology'));
   assert.ok(h.calls.some(c => c.body?.events?.at(-1)?.type === 'system.message'));
   assert.ok(h.calls.some(c => c.body?.events?.some(e => e.type === 'system.message' && e.content?.some(b => b.text?.includes('功能與權限更新')))));

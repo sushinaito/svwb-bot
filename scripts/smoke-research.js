@@ -21,6 +21,10 @@ const cases = [
   { name: 'official-terminology-existing-session', old: true, terminology: true,
     text: '請把以下 SVWB 英文術語逐一寫成官方繁中用語，照原順序列成 English＝繁中，每行一項，全部列完，不需解釋：' + terminology.entries.map(t => t.en).join('、') },
 ];
+cases.push({ name: 'offline-cards-and-progress', old: true, cardCache: true,
+  text: '請先用本機資料查卡名「群蟲惡兆」的卡效，並搜尋所有卡效含守護的精靈卡（含中立以外的精靈即可），列出前五張繁中名稱。查到第一張卡的資料時先更新一下進度，再繼續整理。這次只需已快取的資料，不用上網查最新版本。' });
+cases.push({name:'strongest-three-multiple-sources',text:'能給出三套當前最強的牌組嗎',multiSource:true});
+cases.push({name:'next-update-year-check',text:'下次新版本更新是幾時？',dateCheck:true});
 const budgetCtx = new FakeContext();
 const env = { ...process.env, ...config.vars, TURN_BUDGET_CENTS: process.env.SMOKE_TURN_CENTS || config.vars.TURN_BUDGET_CENTS,
   ANSWER_RESERVE_CENTS: '4', DAILY_BUDGET_CENTS: '100', BUDGET_MARGIN_CENTS: '0' };
@@ -28,7 +32,9 @@ const budget = new DailyBudget(budgetCtx, env); await budgetCtx.ready;
 env.BUDGET = { getByName: () => ({ fetch: (url, init) => budget.fetch(new Request(url, init)) }) };
 for (const [index, item] of cases.entries()) {
   if (process.argv[2] ? !process.argv[2].split(',').map(Number).includes(index) : index > 2) continue;
-  const replies = [], attachments = [], ctx = new FakeContext(), conversation = new Conversation(ctx, env); await ctx.ready;
+  const replies = [], attachments = [], progress = [], finalIndexes = new Map();
+  let discordSequence = 0;
+  const ctx = new FakeContext(), conversation = new Conversation(ctx, env); await ctx.ready;
   let original, finalization = false, completionEvents = [], completionCost = 0;
   const createdSessions = new Set();
   let replay;
@@ -42,7 +48,8 @@ for (const [index, item] of cases.entries()) {
   globalThis.fetch = async (url, init) => {
     // All Discord operations are local captures: no test messages are posted.
     if (new URL(url).hostname === 'discord.com') {
-      if (String(url).endsWith('/messages')) {
+      const messageId = init?.method === 'PATCH' ? new URL(url).pathname.split('/').at(-1) : `local-${++discordSequence}`;
+      if (init?.method === 'PATCH' || String(url).endsWith('/messages')) {
         if (init.body instanceof FormData) {
           const payload = JSON.parse(init.body.get('payload_json'));
           replies.push(payload.content);
@@ -51,9 +58,14 @@ for (const [index, item] of cases.entries()) {
             attachments.push({ ...a, size: file.size, type: file.type });
             await writeFile(`.wrangler/research-${index}-${a.filename}`, new Uint8Array(await file.arrayBuffer()));
           }
-        } else replies.push(JSON.parse(init.body).content);
+        } else {
+          const content=JSON.parse(init.body).content;
+          if (content==='收到，我先看看。' || content.startsWith('處理中｜')) progress.push({method:init.method,id:messageId,content});
+          else if(finalIndexes.has(messageId)) replies[finalIndexes.get(messageId)]=content;
+          else { finalIndexes.set(messageId,replies.length); replies.push(content); }
+        }
       }
-      return Response.json({ id: 'local-test-reply' });
+      return Response.json({ id: messageId });
     }
     if (new URL(url).hostname === 'api.anthropic.com' && init?.method === 'DELETE' && conversation.state.current?.completionSessionId === new URL(url).pathname.split('/').at(-1)) {
       const id = conversation.state.current.completionSessionId;
@@ -95,13 +107,31 @@ for (const [index, item] of cases.entries()) {
     }
     const id = conversation.state.sessionId;
     const session = await claude(env, `/sessions/${id}`), events = await eventsSince(env, id);
-    const result = { case: item.name, version: session.agent.version, reply: replies.join('\n'), costCents: readCost(session),
+    const result = { case: item.name, progress, version: session.agent.version, reply: replies.join('\n'), costCents: readCost(session),
       sessionPreserved: !original || original.id === id, blocked: conversation.state.blocked || null,
       tools: events.filter(e => /tool_use$/.test(e.type)).map(e => ({ type: e.type, name: e.name, input: e.input })),
       finalization, completionCost, totalCostCents: readCost(session) + completionCost, chunks: replies.length, attachments,
     };
     await writeFile(`.wrangler/research-${index}.json`, JSON.stringify({ result, events, completionEvents }, null, 2));
     console.log(JSON.stringify(result));
+    if (item.dateCheck) {
+      if(result.blocked || /2026年?\s*10月\s*29日.{0,20}(?:推出|更新|登場|發售)/.test(result.reply) || /星期.{0,6}(?:有誤|誤植)/.test(result.reply)) throw Error('Old date was promoted to a future release');
+    }
+    if (item.multiSource) {
+      const reads=events.filter(e=>e.type==='user.custom_tool_result').map(e=>JSON.parse(e.content[0].text)).filter(r=>r.status==='ok' && r.source && r.text);
+      const hosts=[...new Set(reads.map(r=>new URL(r.source).hostname))];
+      console.log(JSON.stringify({readSourceHosts:hosts}));
+      if(/[\u3040-\u30ff]/.test(result.reply)) throw Error('Untranslated Japanese labels in recommendation');
+      if(result.blocked || !hosts.includes('gamewith.jp') || !hosts.includes('game8.jp')) throw Error('Strongest-three answer did not read both independent guide sources');
+      continue;
+    }
+    if (item.cardCache) {
+      if (result.blocked || !result.reply.includes('群蟲惡兆') || !progress.some(p=>p.method==='PATCH')) throw Error('Card cache/progress flow failed');
+      if (result.tools.some(t=>['web_search','web_fetch','read_svwb_source'].includes(t.name))) throw Error('Snapshot lookup should need no web tools');
+      const outputs=events.filter(e=>e.type==='user.custom_tool_result').map(e=>JSON.parse(e.content[0].text));
+      if(!outputs.some(o=>o.verification==='official_snapshot' || o.cards?.some(c=>c.verification==='official_snapshot'))) throw Error('Snapshot evidence missing');
+      continue;
+    }
     if (item.deckDelivery && (!attachments.some(a => a.type === 'image/png' && a.size > 1024) ||
       !/牌組代碼：`[a-z0-9]{4}`/i.test(result.reply))) throw Error('Verified deck code or PNG attachment missing');
     if (item.deckDelivery) {

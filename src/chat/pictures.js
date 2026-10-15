@@ -37,15 +37,17 @@ export function deckPictures(input, answer) {
   const candidates = [...(input.deliveryDecks || []), ...collectDeliveryDecks(input.meta)];
   // Only an explicitly linked build is selected, never every archetype fetched
   // during research or a similarly named build mentioned in a comparison.
-  for (const match of answer.matchAll(/https:\/\/shadowverse-wb\.com\/[^\s<>\])]+/g)) {
+  for (const match of answer.matchAll(/https:\/\/shadowverse-wb\.com\/[^\s<>\])）】。，]+/g)) {
     const candidate = candidates.find(d => deckImageUrl(d.deckUrl) === deckImageUrl(match[0]));
     add(match[0], candidate?.label || '牌組', candidate?.cards);
   }
-  return [...pictures.values()].slice(0, 2);
+  return [...pictures.values()].slice(0, 3);
 }
 
 export function localizeDeckLinks(answer) {
-  return answer.replace(/https:\/\/shadowverse-wb\.com\/[^\s<>\])]+/g, raw => {
+  const repaired=answer.replace(/(\[[^\]\n]+\]\()(https:\/\/shadowverse-wb\.com\/[^\s<>）)\]]+)(?=）|\n|$)/g,
+    (whole,prefix,url)=>deckImageUrl(url) ? `${prefix}${url})` : whole);
+  return repaired.replace(/https:\/\/shadowverse-wb\.com\/[^\s<>\])）】。，]+/g, raw => {
     if (!deckImageUrl(raw)) return raw;
     const url = new URL(raw); url.pathname = '/cht/deck/detail/';
     return url.href;

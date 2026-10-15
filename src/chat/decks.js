@@ -34,7 +34,7 @@ export function normalizeDeck(payload, code) {
     if (!/^\d+$/.test(id) || !Number.isInteger(quantity) || quantity < 1 || quantity > 3 ||
         !c || typeof c.name !== 'string' || !Number.isInteger(c.cost) || c.cost < 0) throw new Error('Invalid card data');
     return { id, quantity, name: plain(c.name, 200), cost: c.cost, type: c.type,
-      typeName: { 1: '從者', 2: '法術', 3: '護符' }[c.type],
+      typeName: { 1: '從者', 2: '護符', 3: '護符', 4: '法術' }[c.type],
       attack: c.atk, defense: c.life, text: plain(c.skill_text), evolvedText: plain(detail.evo?.skill_text) };
   });
   const totalCards = cards.reduce((n, c) => n + c.quantity, 0);

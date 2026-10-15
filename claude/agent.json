@@ -60,7 +60,7 @@
     {
       "type": "custom",
       "name": "query_svwb_data",
-      "description": "Read official SVWB card data and public deck/meta data. Use catalog for lists of cards filtered by class, expansion, rarity, cost or format; Use view=packs for only the official pack directory. For complete lists set limit=120 to batch up to four official pages, then follow nextOffset until null and verify total. Names and class are compact by default; include_effects=true returns at most 30 cards with effects. Do not search each card. Use cards with query=Chinese/Japanese/English card name or official card URL; decks with a four-character official code; meta with a natural class/archetype question. Catalog eligibility is current, not a future announcement: combine it with sourced format rules and dates for future changes. Unmatched indexes do not prove nonexistence. Use terminology for the bundled official Chinese/English/Japanese glossary (no network). query can contain one or more terms; omit query to browse, using offset/limit and nextOffset. view=terms returns compact name mappings; view=definitions also returns saved official meanings. Use known cached names without re-fetching web pages; only missing/new terms need official research.",
+      "description": "Search the private official Traditional Chinese card snapshot first, with no network. catalog query accepts literal name/effect keywords (space-separated AND), plus filters and pagination. cards accepts names or IDs/official URLs, including related tokens. Snapshot results include fetchedAt; use fresh=true only when checking new cards, balance updates or current format eligibility. Live filtering does not support free-text effect search: omit query for fresh catalog requests. Read official SVWB card data and public deck/meta data. Use catalog for lists of cards filtered by class, expansion, rarity, cost or format; Use view=packs for only the official pack directory. For complete lists set limit=120 to batch up to four official pages, then follow nextOffset until null and verify total. Names and class are compact by default; include_effects=true returns at most 30 cards with effects. Do not search each card. Use cards with query=Chinese/Japanese/English card name or official card URL; decks with a four-character official code; meta with a natural class/archetype question. Snapshot eligibility is as of fetchedAt, not a future announcement: combine it with sourced format rules and dates for future changes. Unmatched indexes do not prove nonexistence. Use terminology for the bundled official Chinese/English/Japanese glossary (no network). query can contain one or more terms; omit query to browse, using offset/limit and nextOffset. view=terms returns compact name mappings; view=definitions also returns saved official meanings. Use known cached names without re-fetching web pages; only missing/new terms need official research. Use resource=packs for the bundled historical pack timeline: Chinese/Japanese/English names, official IDs, ordinal, full release dates with year and per-field provenance. Empty query lists all; query can be a name, ID, year or 第4彈. This snapshot cannot establish that a future release has or has not been announced; check current official news for that.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -71,7 +71,8 @@
               "catalog",
               "decks",
               "meta",
-              "terminology"
+              "terminology",
+              "packs"
             ]
           },
           "query": {
@@ -135,10 +136,46 @@
           "include_effects": {
             "type": "boolean",
             "description": "Default false for compact complete lists; true returns effects for at most 30 cards."
+          },
+          "fresh": {
+            "type": "boolean",
+            "description": "Explicit live official lookup for cards/catalog. Default false uses the downloaded snapshot. For catalog fresh=true, omit query."
+          },
+          "include_tokens": {
+            "type": "boolean",
+            "description": "For snapshot catalog only: include related token cards in name/effect search and lists. Default false."
+          },
+          "search_in": {
+            "type": "string",
+            "enum": [
+              "all",
+              "names",
+              "effects"
+            ],
+            "description": "Snapshot catalog literal search scope. Use effects for effect-text questions; all searches both names and effects. Matching a word does not necessarily mean the card itself has that ability."
           }
         },
         "required": [
           "resource"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "custom",
+      "name": "report_svwb_progress",
+      "description": "Optionally edit the existing Discord progress message when you have a useful interim finding or a meaningful remaining check. Use brief natural Traditional Chinese, grounded only in evidence already read; distinguish provisional facts from conclusions. Do not send raw drafts, private reasoning, tool traces, repeated plans, budget details or a final answer here. Updates are throttled and may be coalesced. Continue working after this tool; the final answer replaces the same message. No update is necessary for short tasks.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "message": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 800
+          }
+        },
+        "required": [
+          "message"
         ],
         "additionalProperties": false
       }

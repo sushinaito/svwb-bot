@@ -217,7 +217,7 @@ References:
   navigation where possible and retains image alt labels used by card tables.
   Existing idle sessions receive these tools without losing their history.
   Custom tool results are retried by their idempotent event ID; only small markers
-  are stored in the conversation. At most eight direct data/page reads run per turn.
+  are stored in the conversation. At most eight external data/page reads and 24 local snapshot/glossary reads run per turn.
   Search-only drafts receive one source-reading continuation when budget permits.
 - `ANSWER_RESERVE_CENTS=4` reserves part of the existing 20-cent turn allowance
   for the final answer. A soft threshold interrupts research before admitting
@@ -259,24 +259,74 @@ References:
   turn deduplication, conversation memory and the configured cap. Reusing the same
   request ID on the same JST day is idempotent. Reset history records the forgiven
   amount; the reset does not undo charges already incurred at the AI provider.
-- Card-name questions use the public SVWB Meta multilingual index (cached for five
-  minutes) to identify up to three candidates, then fetch each official card's
-  details from the same API used by its card page. Answers can include Japanese
-  voice actor, illustrator, cost and effects with the direct official card link.
-  The generic source reader routes official card URLs through this same exact-ID
-  lookup, avoiding dynamic HTML shells and managed-fetch URL substitutions.
-  Standalone English shorthand can omit a title or separate a compound word.
-  Ambiguous names remain separate candidates; unavailable details are not guessed.
-  Pronoun follow-ups can use a quoted message or card IDs from this conversation
-  within 30 minutes. `reset` clears those IDs too. `/admin/source-health` verifies
-  this official lookup without sending a Discord message or using AI tokens.
-- The generic `catalog` resource queries the official card-list API by class,
-  pack, rarity, cost or format. `view=packs` returns the pack directory;
-  `limit=120` batches up to four pages with duplicate/count/filter validation.
-  Compact names and class labels keep long lists affordable; effects are optional.
-  Responses expose `total` and `nextOffset`; partial data must not be called a
-  complete list. Future eligibility must be inferred from sourced rules and
-  announcements, not from today's legality flag alone.
+- Official Traditional Chinese card data is a private, bundled snapshot at
+  `data/official-cards-cht.json`. Run `npm run cards:cache` once before deploying;
+  an existing complete snapshot is reused without network requests. The downloader
+  reads the public unfiltered catalog sequentially with a 1.5-second delay, validates
+  page counts and IDs, stops on errors/rate limits, and atomically replaces the
+  snapshot only after completion. There is no scheduled refresh. Deliberate updates
+  use `npm run cards:cache -- --refresh`, followed by review and deployment.
+  The initial download contains 811 listed cards plus 93 related tokens. It stores
+  names, effects, stats, CV/illustrator and provenance, without artwork or flavor text.
+  A one-time SVWB Meta name-index read adds Japanese/English aliases by exact card ID,
+  with separate source/date metadata; official Chinese names and effects remain authoritative.
+  Existing complete downloads and aliases are reused without refetching.
+  The snapshot and scratch responses are gitignored; do not publish them as a public
+  dataset. A one-time download reduces load but does not itself confer copyright
+  permission; consult the official site's terms before redistribution.
+- `cards` resolves Chinese names, exact IDs and official URLs from this snapshot,
+  including tokens and the downloaded English/Japanese aliases. Explicit cached
+  tool queries cannot silently fall back to the network; unmatched aliases require
+  separate research or fresh=true. Automatic enrichment can still consult the
+  public multilingual index for an unknown name (cached for five minutes). Pronoun follow-ups can use quoted or recent card
+  IDs; ambiguity remains explicit. `catalog` searches literal name/effect keywords
+  with `query` (space-separated AND) and `search_in=names|effects|all`, filters class/pack/rarity/cost, and paginates
+  with `offset`, `limit`, `total` and `nextOffset`. `include_tokens=true` includes
+  related tokens; `include_effects=true` returns full effects for up to 30 cards;
+  compact pages allow 120 cards. `view=packs` returns the saved pack directory.
+  Results carry `verification=official_snapshot` and `fetchedAt`. Rotation flags
+  reflect the snapshot date; other formats use live filtering. Explicit `fresh=true`
+  bypasses the cache for current eligibility, balance updates or new cards. Live
+  catalog searches cannot combine free-text queries or token inclusion; omit these
+  options and filter using the endpoint's supported fields. Future eligibility still
+  requires sourced format rules and announcements.
+  Only relevant matches and metadata go into model context, never the whole database.
+  The package's default Node import uses an empty fixture so a clean checkout can run
+  tests; Wrangler aliases the module to the private snapshot. `chat:deploy` validates
+  that snapshot first. Offline integration verification uses
+  `node --conditions=card-cache scripts/smoke-card-cache.js`.
+- `claude/packs.json` stores nine historical pack records: official IDs, names,
+  card counts, Japanese/English labels and full ISO release dates with per-field
+  provenance. The user-provided community timeline supplies dates, with official
+  corroboration retained where checked; unverified dates are explicitly marked
+  community_reported. Basic cards are a separate set. Game8 directory conflicts
+  are recorded instead of copied as facts. `query_svwb_data(resource=packs)` reads
+  this file offline; query by name, ID, year or 第4彈, or omit query for all records.
+  `catalog(view=packs)` also enriches official IDs with historical details. Refresh
+  manually from each cited source when releases change. Never infer that an
+  unlisted future pack has not been announced.
+- Current strength comparisons and multiple strongest-deck recommendations read
+  independent recent sources, prioritizing GameWith and Game8 alongside Meta and
+  relevant tournament/build evidence. Preloaded Meta data is not proof of consensus.
+  Final evidence retains source differences and known Chinese card/archetype labels.
+  The source reader returns publication/modification dates, explicit years, and
+  yearless weekday conflicts; a recent page update cannot make an old event current.
+  Completed research answers are passed to the editor so correct chronology and
+  uncertainty survive rewriting. Editing does not grant permission to invent dates
+  or replace a checked year with an ambiguous old table. Bounded live cases 9 and 10
+  cover the user's strongest-three and next-update questions.
+- Each accepted chat request immediately posts a short acknowledgement before
+  research, persisting its Discord message ID. The optional `report_svwb_progress`
+  tool edits that same message with a useful evidence-based interim finding. Updates
+  are coalesced, at least 15 seconds apart, with at most six interim edits per turn.
+  Raw agent drafts and internal reasoning are not streamed. Progress failures do not
+  block the answer, and a durable restart reuses the saved message. The final answer
+  edits the first message; extra chunks and deck pictures follow normally. Budget
+  denials and errors replace the acknowledgement too. Deleted placeholders fall back
+  to a final POST. These Discord updates require no separate model generation.
+  To exercise both features through a disposable real old-agent session, run
+  `node --conditions=card-cache --env-file=.env.txt scripts/smoke-research.js 8`.
+  Discord sends/edits are captured locally; the test incurs bounded AI charges.
 - https://platform.claude.com/docs/en/managed-agents/events-and-streaming
 - Official game vocabulary lives in `claude/terminology.json`, bundled into the
   worker. Each entry has Traditional Chinese, English and Japanese names plus
@@ -298,7 +348,7 @@ References:
   the site's HTML shell. Exact deck evidence and links survive the final writer's
   bounded evidence preparation; repeated source results are deduplicated.
   Already requested public reads interrupted at the research threshold can still
-  supply the final writer, within the same eight-read limit. They do not restart
+  supply the final writer, within the same external/local read limits. They do not restart
   paid research or execute renderer/chat actions. A final answer with Japanese
   labels gets at most one repair in the same completion session and allowance.
 - https://platform.claude.com/docs/en/managed-agents/budgets

@@ -11,3 +11,5 @@ wrangler.chat.local.json
 .fun-secrets.json
 vendor/wbmaker/
 assets/wbmaker/
+data/official-cards-cht.json
+data/official-cards-cht.json.tmp

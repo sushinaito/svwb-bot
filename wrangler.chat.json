@@ -2,6 +2,7 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "svwb-chat-bot",
   "main": "src/chat/worker.js",
+  "alias": { "#card-snapshot": "./data/official-cards-cht.json" },
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
   "services": [{ "binding": "FUN", "service": "svwb-fun-bot" }],
