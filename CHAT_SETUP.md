@@ -278,6 +278,29 @@ References:
   complete list. Future eligibility must be inferred from sourced rules and
   announcements, not from today's legality flag alone.
 - https://platform.claude.com/docs/en/managed-agents/events-and-streaming
+- Official game vocabulary lives in `claude/terminology.json`, bundled into the
+  worker. Each entry has Traditional Chinese, English and Japanese names plus
+  the official definition; the file records its source URLs and verification date.
+  `query_svwb_data(resource=terminology)` reads this file without network access.
+  Query one or more terms, or paginate the directory with `offset`/`limit`.
+  `view=terms` returns names only; `view=definitions` also returns meanings.
+  Normal prompts contain only a short rule and relevant matches, not the full
+  glossary. Unknown terms remain explicitly missing and require official research.
+  When official terms change, review the two source endpoints with `lang: cht`,
+  `en`, and `ja`, update the JSON/date, and redeploy; no per-message refresh runs.
+- Longer research answers receive one tool-free editorial pass using the existing
+  turn budget and answer reserve. Full lists remain complete. Official deck links
+  are localized to Traditional Chinese in the answer; the following PNG/code
+  message does not repeat a link already delivered in that answer.
+  If this optional edit exhausts its allowance, the completed original answer is
+  retained. Reading an official hash deck URL fetches its structured Chinese
+  cards/effects and Japanese aliases matched by the same card IDs, rather than
+  the site's HTML shell. Exact deck evidence and links survive the final writer's
+  bounded evidence preparation; repeated source results are deduplicated.
+  Already requested public reads interrupted at the research threshold can still
+  supply the final writer, within the same eight-read limit. They do not restart
+  paid research or execute renderer/chat actions. A final answer with Japanese
+  labels gets at most one repair in the same completion session and allowance.
 - https://platform.claude.com/docs/en/managed-agents/budgets
 - https://docs.discord.com/developers/events/gateway
 - https://developers.cloudflare.com/changelog/post/2026-06-19-outbound-connections-keep-dos-alive/

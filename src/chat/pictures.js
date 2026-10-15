@@ -13,10 +13,16 @@ export function deckImageUrl(deckUrl) {
 
 export function collectDeliveryDecks(result) {
   if (result?.status !== 'ok') return [];
-  return (result.archetypes || []).flatMap(a => (a.decks || []).filter(d => deckImageUrl(d.deckUrl)).map(d => ({
+  const metaDecks = (result.archetypes || []).flatMap(a => (a.decks || []).filter(d => deckImageUrl(d.deckUrl)).map(d => ({
     deckUrl: d.deckUrl, label: `${a.className || result.className || '牌組'}・${a.name}`,
+    source: result.source,
     ...(d.cards ? { cards: d.cards.map(c => ({ id: c.id, quantity: c.quantity })) } : {}),
-  }))).slice(0, 16);
+  })));
+  const linkedDecks = (result.links || []).filter(l => deckImageUrl(l.url)).map(l => ({
+    deckUrl: l.url, label: '牌組', source: result.source,
+  }));
+  const exactDeck = deckImageUrl(result.deckUrl) ? [{ deckUrl: result.deckUrl, label: result.className || '牌組', source: result.source, cards: result.cards }] : [];
+  return [...exactDeck, ...metaDecks, ...linkedDecks].slice(0, 16);
 }
 
 export function deckPictures(input, answer) {
@@ -36,6 +42,14 @@ export function deckPictures(input, answer) {
     add(match[0], candidate?.label || '牌組', candidate?.cards);
   }
   return [...pictures.values()].slice(0, 2);
+}
+
+export function localizeDeckLinks(answer) {
+  return answer.replace(/https:\/\/shadowverse-wb\.com\/[^\s<>\])]+/g, raw => {
+    if (!deckImageUrl(raw)) return raw;
+    const url = new URL(raw); url.pathname = '/cht/deck/detail/';
+    return url.href;
+  });
 }
 
 export async function fetchDeckPicture(picture, fetcher = fetch) {
@@ -60,7 +74,7 @@ export async function fetchDeckPicture(picture, fetcher = fetch) {
   return new Blob([bytes], { type: 'image/png' });
 }
 
-export async function sendDeckPictures(env, input, answer, fetcher = fetch) {
+export async function sendDeckPictures(env, input, answer, fetcher = fetch, { linksInAnswer = false } = {}) {
   const pictures = deckPictures(input, answer);
   if (!pictures.length) return;
   const ready = await Promise.all(pictures.map(async picture => {
@@ -70,8 +84,9 @@ export async function sendDeckPictures(env, input, answer, fetcher = fetch) {
   }));
   const attached = ready.filter(p => p.blob);
   const form = new FormData();
-  const payload = { content: ready.map((p, i) => `${i + 1}. ${p.label}\n${p.code ? `牌組代碼：\`${p.code}\`` : '暫時無法取得牌組代碼，可從官方牌表重新發行。'}\n[官方牌表](<${p.deckUrl}>)${p.blob ? '' : '（牌組圖暫時無法載入）'}`).join('\n\n') +
-      (ready.some(p => p.code) ? '\n\n代碼可能失效；若無法匯入，請開啟官方牌表重新發行。' : ''),
+  const linkLabel = linksInAnswer ? '上方的官方牌表' : '官方牌表';
+  const payload = { content: ready.map((p, i) => `${ready.length > 1 ? `${i + 1}. ${p.label}\n` : ''}${p.code ? `牌組代碼：\`${p.code}\`` : `暫時無法取得牌組代碼，可從${linkLabel}重新發行。`}${linksInAnswer ? '' : `\n[官方牌表](<${p.deckUrl}>)`}${p.blob ? '' : '\n牌組圖暫時無法載入。'}`).join('\n\n') +
+      (ready.some(p => p.code) ? `\n\n若代碼失效，請開啟${linkLabel}重新發行。` : ''),
     allowed_mentions: { parse: [], replied_user: false }, flags: 4,
     nonce: await messageNonce(`${input.id}:deck-pictures`), enforce_nonce: true,
     message_reference: { message_id: input.id, fail_if_not_exists: false },

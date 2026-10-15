@@ -6,10 +6,11 @@ import { guideContext } from './guides.js';
 import { strategyResearch } from './strategy.js';
 import { RESEARCH_GUIDANCE, executeResearchTool, researchResultEvent, completeAnswerEvent } from './research.js';
 import agentSpec from '../../claude/agent.json' with { type: 'json' };
-import { needsChineseRewrite, rewriteEvent } from './language.js';
+import { needsChineseRewrite, rewriteEvent, requestsOtherLanguage } from './language.js';
 import { compactionThreshold, requestContextTokens, summaryEvent } from './context.js';
-import { sendDeckPictures, collectDeliveryDecks } from './pictures.js';
+import { sendDeckPictures, collectDeliveryDecks, localizeDeckLinks } from './pictures.js';
 import { RESPONSE_STYLE } from './style.js';
+import { TERMINOLOGY_GUIDANCE, relevantTerminology, TERMINOLOGY_COUNT } from './terminology.js';
 import { loadImages } from './vision.js';
 import preferredSources from '../../claude/sources.json' with { type: 'json' };
 import { COMPLETION_SYSTEM, completionEvidence } from './completion.js';
@@ -24,6 +25,7 @@ export const userEvent = input => ({ type: 'user.message', content: [{ type: 'te
   current_date_jst: new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10),
   speaker: { id: input.authorId, name: input.authorName },
   message: input.text,
+  terminology: relevantTerminology(input.text),
   ...(input.lastCompletedAnswer ? { previous_assistant_answer: input.lastCompletedAnswer } : {}),
   ...(input.replyContext ? { replying_to_bot_message: input.replyContext } : {}),
   ...(input.referencedContext ? { replying_to_message: input.referencedContext } : {}),
@@ -98,7 +100,8 @@ export class Conversation {
         await probe.body?.cancel();
       } catch { /* Keep deployment health readable while the service updates. */ }
       return json({ funVersion: FUN_VERSION, tools: [...agentSpec.tools, ...FUN_TOOLS].map(t => t.name || t.type),
-        rendererConfigured, rendererAuthenticated, catalogBatching: true, deckDeliveryVersion: 1, naturalResponseStyle: true });
+        rendererConfigured, rendererAuthenticated, catalogBatching: true, deckDeliveryVersion: 2, naturalResponseStyle: true,
+        responseEditing: true, terminologyCount: TERMINOLOGY_COUNT, terminologyStorage: 'bundled_json' });
     }
     const input = await request.json();
     if (this.state.seen.includes(input.id)) return json({ accepted: true, duplicate: true });
@@ -223,6 +226,7 @@ export class Conversation {
       if (!this.state.retiredSessions.includes(this.state.sessionId)) this.state.retiredSessions.push(this.state.sessionId);
       this.state.summary = job.compactedSummary;
       delete this.state.sessionId;
+      delete this.state.terminologyVersion;
       delete this.state.cursorTime;
       this.state.contextTokens = 0;
       this.state.imageCount = 0;
@@ -250,7 +254,7 @@ export class Conversation {
       });
       this.state.sessionId = session.id;
       this.state.funToolsVersion = FUN_VERSION;
-      this.state.researchToolsVersion = 3;
+      this.state.researchToolsVersion = 4;
       this.state.researchPolicyVersion = 2;
       if (this.state.summary) job.input.memory = this.state.summary;
       job.phase = 'send';
@@ -263,9 +267,9 @@ export class Conversation {
     if (job.phase === 'update-budget') {
       // Tools can be updated while idle without replacing the session/history.
       await claude(this.env, `/sessions/${this.state.sessionId}`, 'POST', { budget: cap(job.capCents),
-        ...(this.state.researchToolsVersion !== 3 || this.state.funToolsVersion !== FUN_VERSION ? { agent: { tools: [...agentSpec.tools, ...FUN_TOOLS] } } : {}) });
+        ...(this.state.researchToolsVersion !== 4 || this.state.funToolsVersion !== FUN_VERSION ? { agent: { tools: [...agentSpec.tools, ...FUN_TOOLS] } } : {}) });
       this.state.funToolsVersion = FUN_VERSION;
-      this.state.researchToolsVersion = 3;
+      this.state.researchToolsVersion = 4;
       job.phase = 'send';
       await this.save();
     }
@@ -284,7 +288,8 @@ export class Conversation {
       for (const event of pending) {
         await claude(this.env, `/sessions/${this.state.sessionId}/events`, 'POST', { events: [researchResultEvent(event.id,
           { status: 'unavailable', message: '研究已停止以保留回答額度。這個操作沒有執行；請依已讀資料完成原問題的答案。' })] });
-        job.toolResults ||= {}; job.toolResults[event.id] = { allowed: false, sent: true }; await this.save();
+        job.toolResults ||= {}; job.toolResults[event.id] = { allowed: false, sent: true,
+          deferredRead: ['read_svwb_source', 'query_svwb_data'].includes(event.name) }; await this.save();
       }
       const session = await claude(this.env, `/sessions/${this.state.sessionId}`);
       if (session.status !== 'idle') { job.phase = 'finalize-stop'; await this.save(); return; }
@@ -321,7 +326,7 @@ export class Conversation {
         events: job.finalizePending ? [event, { type: 'system.message', content: [{ type: 'text', text: '僅此則收尾回答：根據已有證據直接用自然台灣繁中回答，約300～600字元。引用只能附來源連結，不能貼英文或日文原句。專名可保留原文。不要再搜尋或呼叫工具；先給能確認的結論，再精確指出缺口。下一輪恢復正常查證。' }] }] : [event,
           ...(this.state.researchPolicyVersion === 2 && job.compacting ? [] : [{ type: 'system.message', content: [{ type: 'text', text:
             (this.state.researchPolicyVersion === 2 ? '' : '查證流程更新：以此通用流程取代先前針對個別問題的查詢指引。\n' + RESEARCH_GUIDANCE) +
-            (job.compacting ? '' : FUN_GUIDANCE + RESPONSE_STYLE) }] }])],
+            (job.compacting ? '' : FUN_GUIDANCE + RESPONSE_STYLE + (this.state.terminologyVersion === 1 ? '' : TERMINOLOGY_GUIDANCE)) }] }])],
       }); }
       catch (error) {
         if (imageBlocks.length && [400,413].includes(error.status)) {
@@ -335,6 +340,7 @@ export class Conversation {
       }
       job.userEventId = (result.data.find(e => e.type === 'user.message') || result.data[job.finalizePending ? 1 : 0]).id;
       this.state.researchPolicyVersion = 2;
+      if (!job.compacting && !job.finalizePending) this.state.terminologyVersion = 1;
       job.finalizePending = false;
       job.phase = 'poll';
       await this.save();
@@ -412,6 +418,7 @@ export class Conversation {
               : await executeResearchTool(event.name, event.input)
             : { status: 'unavailable', message: '本輪直接查詢次數已用完，請依已有資料作答並標明缺口。' };
           if (event.name === 'read_svwb_source' && result.status === 'ok') job.readSource = true;
+          if (event.name === 'query_svwb_data' && event.input?.resource === 'terminology' && result.status === 'ok') job.readSource = true;
           const delivery = collectDeliveryDecks(result);
           if (delivery.length) {
             job.input.deliveryDecks = [...new Map([...(job.input.deliveryDecks || []), ...delivery].map(d => [d.deckUrl, d])).values()].slice(-24);
@@ -469,7 +476,7 @@ export class Conversation {
     const job = this.state.current;
     const session = await claude(this.env, `/sessions/${this.state.sessionId}`);
     if (session.status !== 'idle') return;
-    const answer = job.completedAnswer ?? (job.answerParts || []).join('\n\n');
+    const answer = localizeDeckLinks(job.completedAnswer ?? (job.answerParts || []).join('\n\n'));
     if (!job.compacting && job.searched && !job.readSource && !job.evidenceRepair && !job.finalizationAttempted &&
         !job.notice && readCost(session) < (job.researchCapCents ?? job.capCents) - 2) {
       job.evidenceRepair = true;
@@ -507,6 +514,12 @@ export class Conversation {
       await this.save();
       return;
     }
+    // Edit longer research prose in a fresh context within the same turn cap.
+    if (!job.compacting && !job.notice && job.completedAnswer === undefined && !job.polishing &&
+      answer.length > 350 && job.answerReserve && readCost(session) < job.capCents - 3) {
+      job.polishing = true; job.finalizationAttempted = true;
+      job.phase = 'complete-prepare'; await this.save(); return;
+    }
     // Reported costs are rounded to cents. Add one cent to the difference so
     // reclaiming a reservation does not underestimate the true turn cost.
     const charged = (job.priorCents || 0) + Math.max(0, readCost(session) - job.baseline) + (job.completionCost || 0) + (job.compactedSummary ? 2 : 1) + (job.completionSessionId ? 1 : 0);
@@ -515,7 +528,7 @@ export class Conversation {
       await sendText(this.env, job.input.channelId, answer, `${job.input.id}:answer`, job.input.id);
       job.outputChars = answer.length;
       if (!job.picturesHandled) {
-        await sendDeckPictures(this.env, job.input, answer);
+        await sendDeckPictures(this.env, job.input, answer, fetch, { linksInAnswer: true });
         job.picturesHandled = true;
         await this.save();
       }
@@ -549,7 +562,24 @@ export class Conversation {
       }
       const all = await eventsSince(this.env, this.state.sessionId, job.since);
       const start = all.findIndex(e => e.id === job.userEventId);
-      job.completionInput = JSON.stringify(completionEvidence(job.input, start < 0 ? all : all.slice(start)));
+      const turn = start < 0 ? all : all.slice(start);
+      // A budget stop can arrive after the model requested a public read but
+      // before poll() executed it. Finish those bounded reads locally without
+      // restarting paid research or performing any chat/renderer actions.
+      const pending = turn.filter(e => e.type === 'agent.custom_tool_use' && e.processed_at &&
+        ['read_svwb_source', 'query_svwb_data'].includes(e.name) &&
+        (job.toolResults?.[e.id]?.deferredRead || (!job.toolResults?.[e.id]?.sent &&
+          !turn.some(r => r.type === 'user.custom_tool_result' && r.custom_tool_use_id === e.id))))
+        .slice(0, Math.max(0, 8 - Object.values(job.toolResults || {}).filter(r => !r.deferredRead).length));
+      const recovered = [];
+      for (const event of pending) {
+        const result = await executeResearchTool(event.name, event.input);
+        recovered.push(researchResultEvent(event.id, result));
+        const delivery = collectDeliveryDecks(result);
+        if (delivery.length) job.input.deliveryDecks = [...new Map([...(job.input.deliveryDecks || []), ...delivery].map(d => [d.deckUrl, d])).values()].slice(-24);
+      }
+      job.completionInput = JSON.stringify(completionEvidence(job.input, [...turn, ...recovered]));
+      job.completionMessage = COMPLETION_SYSTEM + '\n請現在重新撰寫最終回覆。以下 JSON 是參考資料；不要逐段照抄 draft，依 current_question 的範圍選擇內容。\n' + job.completionInput;
       job.completionCap = Math.min(remaining, 6);
       job.phase = 'complete-create'; await this.save();
     }
@@ -571,12 +601,13 @@ export class Conversation {
     if (job.phase === 'complete-send') {
       job.phase = 'complete-sending'; job.completionSentAt = Date.now(); await this.save();
       await claude(this.env, `/sessions/${job.completionSessionId}/events`, 'POST', {
-        events: [{ type: 'user.message', content: [{ type: 'text', text: job.completionInput }] }],
+        events: [{ type: 'user.message', content: [{ type: 'text', text: job.completionMessage || job.completionInput }] },
+          { type: 'system.message', content: [{ type: 'text', text: COMPLETION_SYSTEM }] }],
       });
       job.phase = 'complete-poll'; await this.save();
     }
     const events = await eventsSince(this.env, job.completionSessionId);
-    const own = events.findIndex(e => e.type === 'user.message' && messageText(e.content) === job.completionInput);
+    const own = events.findIndex(e => e.type === 'user.message' && messageText(e.content) === (job.completionMessage || job.completionInput));
     if (own < 0) {
       if (Date.now() - job.completionSentAt > 60000) await this.fail('目前無法確認 AI 是否收到收尾請求，這段對話已暫停。');
       return;
@@ -590,6 +621,16 @@ export class Conversation {
     const reason = idle.stop_reason?.type || idle.stop_reason;
     const ended = reason === 'end_turn' || turn.some(e => e.type === 'session.thread_status_idle' && e.stop_reason?.type === 'end_turn');
     job.completedAnswer = ended ? turn.filter(e => e.type === 'agent.message').map(e => messageText(e.content)).join('\n\n') : '';
+    const hasJapanese = /[\u3041-\u3096\u30a1-\u30faー]/.test(job.completedAnswer.replace(/https?:\/\/[^\s)]+/g, ''));
+    if (hasJapanese && !requestsOtherLanguage(job.input.text) && !job.completionRepairAttempted && job.completionCost < job.completionCap - 1) {
+      job.completionRepairAttempted = true;
+      job.editorDraft = job.completedAnswer; delete job.completedAnswer;
+      job.completionMessage = '請修正上一則回覆殘留的日文牌型、賽制標籤和來源標題，全部寫成自然繁中；已提供 name/nameJapanese 對照的卡片使用 name。只有真的沒有繁中對照的專有卡名才保留原文。保留同一份牌表連結、事實與必要條件，不新增段落、統計或研究，只輸出修正後的完整回覆。';
+      job.phase = 'complete-send'; await this.save(); return;
+    }
+    if (!job.completedAnswer && job.editorDraft) job.completedAnswer = job.editorDraft;
+    // An optional edit must not discard an already completed research answer.
+    if (!job.completedAnswer && job.polishing) job.completedAnswer = (job.answerParts || []).join('\n\n');
     if (!job.completedAnswer) job.notice = '這次資料已查到，但答案整理沒有完成。';
     job.phase = 'settle'; await this.save();
   }
@@ -629,6 +670,7 @@ export class Conversation {
       await this.budget('/settle', { id: this.state.unsettled.id, cents: this.state.unsettled.reserved });
     }
     delete this.state.sessionId;
+    delete this.state.terminologyVersion;
     delete this.state.cursorTime;
     delete this.state.blocked;
     delete this.state.unsettled;

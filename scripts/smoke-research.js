@@ -4,6 +4,8 @@ import { Conversation, readCost, eventsSince } from '../src/chat/conversation.js
 import { DailyBudget } from '../src/chat/budget.js';
 import { FakeContext } from '../test/helpers.js';
 import { needsChineseRewrite } from '../src/chat/language.js';
+import { deckImageUrl } from '../src/chat/pictures.js';
+import terminology from '../claude/terminology.json' with { type: 'json' };
 
 const setup = JSON.parse(await readFile('.chat-setup.json', 'utf8'));
 const config = JSON.parse(await readFile('wrangler.chat.local.json', 'utf8'));
@@ -16,6 +18,8 @@ const cases = [
   { name: 'tempo-elf-existing-session', text: '來一套節奏妖', old: true, deckDelivery: true },
   { name: 'dragon-rotation-budget-regression', text: '下版本龍族退掉什麼牌', replay: true },
   { name: 'complete-rotation-list', text: '下版本全部退環境的牌，全部職業與中立都列出，不要只給重點', completeList: true },
+  { name: 'official-terminology-existing-session', old: true, terminology: true,
+    text: '請把以下 SVWB 英文術語逐一寫成官方繁中用語，照原順序列成 English＝繁中，每行一項，全部列完，不需解釋：' + terminology.entries.map(t => t.en).join('、') },
 ];
 const budgetCtx = new FakeContext();
 const env = { ...process.env, ...config.vars, TURN_BUDGET_CENTS: process.env.SMOKE_TURN_CENTS || config.vars.TURN_BUDGET_CENTS,
@@ -100,6 +104,19 @@ for (const [index, item] of cases.entries()) {
     console.log(JSON.stringify(result));
     if (item.deckDelivery && (!attachments.some(a => a.type === 'image/png' && a.size > 1024) ||
       !/牌組代碼：`[a-z0-9]{4}`/i.test(result.reply))) throw Error('Verified deck code or PNG attachment missing');
+    if (item.deckDelivery) {
+      const links = [...result.reply.matchAll(/https:\/\/shadowverse-wb\.com\/[^\s<>\])]+/g)].filter(match => deckImageUrl(match[0]));
+      if (links.length !== 1 || !links[0][0].includes('/cht/')) throw Error('Deck link must appear once in Chinese');
+      if (/我先(?:把|當)|以下是.{0,10}推論|已驗證.{0,5}指南|占.{0,15}樣本|全服使用率|[\u3040-\u30ff]|增幅\s*4/.test(result.reply)) throw Error('Reviewed wording, untranslated names, or incorrect terminology regressed');
+    }
+    if (item.terminology) {
+      const lines = result.reply.split('\n');
+      const missing = terminology.entries.filter(t => !lines.some(line => line.includes(t.en) &&
+        (line.includes(t.cht) || t.cht === '+1/+2' && line.includes('+X/+Y'))));
+      console.log(JSON.stringify({ officialTerms: terminology.entries.length, missing: missing.map(t => t.cht) }));
+      if (missing.length || result.blocked) throw Error('Official terminology mismatch');
+      continue;
+    }
     if (item.completeList) {
       const { cardCatalog } = await import('../src/chat/cards.js');
       const expected = await cardCatalog({pack_id:10004},0,realFetch,{limit:120});

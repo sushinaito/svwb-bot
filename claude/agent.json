@@ -60,7 +60,7 @@
     {
       "type": "custom",
       "name": "query_svwb_data",
-      "description": "Read official SVWB card data and public deck/meta data. Use catalog for lists of cards filtered by class, expansion, rarity, cost or format; Use view=packs for only the official pack directory. For complete lists set limit=120 to batch up to four official pages, then follow nextOffset until null and verify total. Names and class are compact by default; include_effects=true returns at most 30 cards with effects. Do not search each card. Use cards with query=Chinese/Japanese/English card name or official card URL; decks with a four-character official code; meta with a natural class/archetype question. Catalog eligibility is current, not a future announcement: combine it with sourced format rules and dates for future changes. Unmatched indexes do not prove nonexistence.",
+      "description": "Read official SVWB card data and public deck/meta data. Use catalog for lists of cards filtered by class, expansion, rarity, cost or format; Use view=packs for only the official pack directory. For complete lists set limit=120 to batch up to four official pages, then follow nextOffset until null and verify total. Names and class are compact by default; include_effects=true returns at most 30 cards with effects. Do not search each card. Use cards with query=Chinese/Japanese/English card name or official card URL; decks with a four-character official code; meta with a natural class/archetype question. Catalog eligibility is current, not a future announcement: combine it with sourced format rules and dates for future changes. Unmatched indexes do not prove nonexistence. Use terminology for the bundled official Chinese/English/Japanese glossary (no network). query can contain one or more terms; omit query to browse, using offset/limit and nextOffset. view=terms returns compact name mappings; view=definitions also returns saved official meanings. Use known cached names without re-fetching web pages; only missing/new terms need official research.",
       "input_schema": {
         "type": "object",
         "properties": {
@@ -70,7 +70,8 @@
               "cards",
               "catalog",
               "decks",
-              "meta"
+              "meta",
+              "terminology"
             ]
           },
           "query": {
@@ -113,21 +114,23 @@
           "offset": {
             "type": "integer",
             "minimum": 0,
-            "description": "Catalog pagination; use nextOffset from the previous result"
+            "description": "Catalog or terminology pagination; use nextOffset from the previous result"
           },
           "limit": {
             "type": "integer",
             "minimum": 1,
             "maximum": 120,
-            "description": "Catalog cards per batch, default 30. Use 120 for a complete expansion."
+            "description": "Catalog cards per batch, default 30; use 120 for a complete expansion. Terminology defaults to 12 and returns at most 30 terms per page."
           },
           "view": {
             "type": "string",
             "enum": [
               "cards",
-              "packs"
+              "packs",
+              "terms",
+              "definitions"
             ],
-            "description": "packs returns only pack metadata; cards returns the filtered card list (default)."
+            "description": "For catalog: packs returns pack metadata; cards returns the filtered list (default). For terminology: terms returns name mappings (default); definitions also includes official meanings."
           },
           "include_effects": {
             "type": "boolean",

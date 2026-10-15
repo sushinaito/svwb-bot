@@ -1,5 +1,6 @@
 import { cardContext, cardCatalog } from './cards.js';
-import { deckContext } from './decks.js';
+import { deckContext, lookupDeckHash } from './decks.js';
+import { lookupTerminology } from './terminology.js';
 import { metaContext } from './meta.js';
 import { readPage, stripActive, textOf } from './guides.js';
 
@@ -74,6 +75,9 @@ export async function executeResearchTool(name, input, fetcher = fetch) {
       const url = sourceUrl(input.url);
       if (!url) return { status: 'unavailable', reason: 'Unsupported URL. Use web_fetch for other public sources.' };
       const parsed = new URL(url);
+      if (parsed.hostname === 'shadowverse-wb.com' && /^\/(?:cht|ja|en)\/deck\/(?:detail|build_edit)\/$/.test(parsed.pathname) && parsed.searchParams.has('hash')) {
+        return await lookupDeckHash(url, fetcher);
+      }
       if (parsed.hostname === 'shadowverse-wb.com' && /^\/(?:cht|ja|en|chs|ko)\/deck\/cardslist\/card\/$/.test(parsed.pathname)) {
         // The HTML is a dynamic shell; use the site's card endpoint and
         // validate the exact ID instead of letting web_fetch substitute URLs.
@@ -84,6 +88,7 @@ export async function executeResearchTool(name, input, fetcher = fetch) {
       return parseSource(await readPage(url, fetcher, AbortSignal.timeout(15000)), url, { offset, find });
     }
     if (name === 'query_svwb_data') {
+      if (input.resource === 'terminology') return lookupTerminology(input.query, input);
       if (input.resource === 'catalog') return await cardCatalog(input.filters, input.offset, fetcher, input);
       if (typeof input.query !== 'string' || !input.query.trim() || input.query.length > 500) throw Error('Invalid query');
       let result;

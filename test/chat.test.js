@@ -174,10 +174,12 @@ async function harness(t, answers = [], options = {}) {
       if (init.method === 'DELETE') return new Response(null,{status:204});
       if (url.pathname.endsWith('/events')) {
         if (init.method === 'POST') {
+          // The live Sessions API requires system.message to be the final event.
+          assert.ok(body.events.every((e, i) => e.type !== 'system.message' || i === body.events.length - 1));
           const submitted = body.events.map(e=>({...e,id:`completion_${sequence}`,processed_at:stamp()}));
           completion.events.push(...submitted,
             {id:'completed',type:'agent.message',content:[{type:'text',text:answers.shift() || '整理後的繁中答案'}],processed_at:stamp()},
-            {id:'completion-idle',type:'session.status_idle',stop_reason:{type:'end_turn'},processed_at:stamp()});
+            {id:'completion-idle',type:'session.status_idle',stop_reason:{type:options.completionBudgetReached ? 'budget_reached' : 'end_turn'},processed_at:stamp()});
           completion.usage.list_cost.amount='2';
           if (options.loseCompletionResponse) { options.loseCompletionResponse=false; throw Error('Lost completion response'); }
           return Response.json({data:submitted});
@@ -533,7 +535,8 @@ test('existing conversations receive new tools without replacing their session o
   assert.ok(update.body.agent.tools.some(t => t.name === 'read_svwb_source'));
   assert.ok(update.body.agent.tools.some(t => t.name === 'roll_dice'));
   assert.ok(update.body.agent.tools.some(t => t.name === 'make_custom_card'));
-  assert.equal(h.conversation.state.researchToolsVersion, 3);
+  assert.equal(h.conversation.state.researchToolsVersion, 4);
+  assert.ok(update.body.agent.tools.find(t => t.name === 'query_svwb_data').input_schema.properties.resource.enum.includes('terminology'));
   assert.ok(h.calls.some(c => c.body?.events?.at(-1)?.type === 'system.message'));
   assert.ok(h.calls.some(c => c.body?.events?.some(e => e.type === 'system.message' && e.content?.some(b => b.text?.includes('功能與權限更新')))));
   for (const call of h.calls.filter(c => c.body?.events)) assert.ok(call.body.events.filter(e => e.type === 'system.message').length <= 1);
@@ -558,7 +561,9 @@ test('research exhaustion completes from plain evidence within the remaining all
   h.setAutoAnswer(false); await h.enqueue(input('research')); await h.conversation.alarm();
   assert.equal(h.calls.find(c => c.path === '/v1/sessions').body.budget.max_list_cost.amount, '20');
   h.setUsage(16);
-  h.events.push({ id: 'research-cap', type: 'session.status_idle', stop_reason: { type: 'budget_reached' }, processed_at: '2026-10-15T05:00:03.000Z' });
+  h.events.push({ id: 'pending-read', type: 'agent.custom_tool_use', name: 'query_svwb_data',
+    input: { resource: 'terminology', query: 'Invoke' }, processed_at: '2026-10-15T05:00:04.000Z' });
+  h.events.push({ id: 'research-cap', type: 'session.status_idle', stop_reason: { type: 'budget_reached' }, processed_at: '2026-10-15T05:00:05.000Z' });
   await h.conversation.alarm();
   assert.equal(h.conversation.state.current.phase, 'finalize-stop');
   assert.equal(h.conversation.state.blocked, undefined);
@@ -569,6 +574,11 @@ test('research exhaustion completes from plain evidence within the remaining all
   const finish = h.calls.find(c => c.body?.agent?.tools?.length === 0);
   assert.equal(finish.body.budget.max_list_cost.amount, '3');
   assert.equal(finish.body.agent.type, 'agent_with_overrides');
+  const finalRequest = h.calls.find(c => c.path === '/v1/sessions/sesn_completion/events' && c.method === 'POST');
+  assert.ok(finalRequest.body.events[0].content[0].text.includes('official_snapshot'));
+  assert.ok(finalRequest.body.events[0].content[0].text.includes('瞬念召喚'));
+  const drained = h.calls.flatMap(c => c.path === '/v1/sessions/sesn_test/events' ? c.body?.events || [] : []).filter(e => e.custom_tool_use_id === 'pending-read');
+  assert.ok(drained.every(e => JSON.parse(e.content[0].text).status === 'unavailable'));
   assert.ok(h.calls.some(c => c.body?.events?.[0]?.type === 'user.interrupt'));
   assert.equal(budgetStatus(h.budget.state, env).accountedCents, 20);
   assert.equal(budgetStatus(h.budget.state, env).reservedCents, 0);
@@ -576,6 +586,43 @@ test('research exhaustion completes from plain evidence within the remaining all
   assert.equal(h.conversation.state.sessionId,'sesn_test');
   assert.ok(h.calls.some(c => c.path.endsWith('/sesn_completion') && c.method === 'DELETE'));
   assert.ok(h.calls.some(c => c.body?.events?.some(e=>e.content?.some(b=>b.text?.includes('previous_assistant_answer')))));
+});
+
+test('long drafts are edited once within the original budget before being published', async t => {
+  const h = await harness(t, ['研究草稿。'.repeat(80), '試試這套。先留低費從者，依場面決定進化時機。']);
+  h.localEnv.ANSWER_RESERVE_CENTS = '4';
+  await h.enqueue(input('editing')); await h.conversation.alarm();
+  assert.equal(h.replies.length, 0);
+  assert.equal(h.conversation.state.current.polishing, true);
+  for (let i = 0; i < 6 && h.conversation.state.current; i++) await h.conversation.alarm();
+  assert.deepEqual(h.replies, ['試試這套。先留低費從者，依場面決定進化時機。']);
+  const editors = h.calls.filter(c => c.body?.agent?.tools?.length === 0);
+  assert.equal(editors.length, 1);
+  assert.equal(editors[0].body.budget.max_list_cost.amount, '6');
+  assert.equal(h.conversation.state.sessionId, 'sesn_test');
+  assert.ok(budgetStatus(h.budget.state, env).accountedCents <= 20);
+  assert.equal(budgetStatus(h.budget.state, env).reservedCents, 0);
+});
+
+test('an optional edit that runs out of budget preserves the completed original answer', async t => {
+  const draft = '已查證的回答。'.repeat(60);
+  const h = await harness(t, [draft, '未完成的編輯'], { completionBudgetReached: true });
+  h.localEnv.ANSWER_RESERVE_CENTS = '4';
+  await h.enqueue(input('editing-budget')); await h.conversation.alarm();
+  for (let i = 0; i < 6 && h.conversation.state.current; i++) await h.conversation.alarm();
+  assert.deepEqual(h.replies, [draft]);
+  assert.equal(h.conversation.state.sessionId, 'sesn_test');
+  assert.equal(budgetStatus(h.budget.state, env).reservedCents, 0);
+});
+
+test('a final writer repairs Japanese labels once within its existing session allowance', async t => {
+  const h = await harness(t, ['研究草稿。'.repeat(80), '推薦テンポエルフ（ローテ），附上這份牌表。', '推薦這套輪替節奏妖，附上這份牌表。']);
+  h.localEnv.ANSWER_RESERVE_CENTS = '4';
+  await h.enqueue(input('editing-labels')); await h.conversation.alarm();
+  for (let i = 0; i < 9 && h.conversation.state.current; i++) await h.conversation.alarm();
+  assert.deepEqual(h.replies, ['推薦這套輪替節奏妖，附上這份牌表。']);
+  assert.equal(h.calls.filter(c => c.body?.agent?.tools?.length === 0).length, 1);
+  assert.equal(h.calls.filter(c => c.path === '/v1/sessions/sesn_completion/events' && c.method === 'POST').length, 2);
 });
 
 test('search-only drafts get one bounded source-reading continuation before delivery', async t => {

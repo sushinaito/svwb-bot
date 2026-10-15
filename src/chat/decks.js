@@ -101,6 +101,28 @@ export function cardSignature(cards) {
   return total === 40 ? cards.map(c => `${c.id}:${c.quantity}`).sort().join(',') : null;
 }
 
+export async function lookupDeckHash(deckUrl, fetcher = fetch) {
+  const url = new URL(deckUrl), hash = url.searchParams.get('hash');
+  if (url.origin !== BASE || !/^\/(?:cht|ja|en)\/deck\/(?:detail|build_edit)\/$/.test(url.pathname) ||
+      !/^[1-3]\.[0-7](?:\.[A-Za-z0-9_-]{4,8}){40}$/.test(hash || '')) throw Error('Invalid complete deck');
+  const read = async lang => portalJson(await fetcher(`${BASE}/web/DeckBuilder/deckHashDetail?hash=${encodeURIComponent(hash)}`, {
+    headers: { lang, Referer: `${BASE}/cht/deck/build_edit/`, 'X-Requested-With': 'XMLHttpRequest' },
+    redirect: 'manual', signal: AbortSignal.timeout(10000),
+  }));
+  const deck = normalizeDeck(await read('cht'), '');
+  if (!cardSignature(deck.cards)) throw Error('Incomplete official deck');
+  // Exact IDs link guide names to authoritative Chinese names without guessing.
+  try {
+    const japanese = normalizeDeck(await read('ja'), '');
+    if (cardSignature(japanese.cards) === cardSignature(deck.cards)) {
+      for (const card of deck.cards) card.nameJapanese = japanese.cards.find(c => c.id === card.id)?.name;
+    }
+  } catch { /* Chinese facts remain usable when the optional alias lookup fails. */ }
+  url.pathname = '/cht/deck/detail/';
+  return { ...deck, source: url.href, deckUrl: url.href, verification: 'official',
+    caveat: '這份官方牌表的確切卡名、張數與卡效。日文名稱以相同卡片 ID 對照；解說使用繁中名。' };
+}
+
 // Follow the public builder's anonymous CSRF/cookie flow. Codes are temporary;
 // always retain the hash link so the user can reissue one on the official site.
 export async function publishDeckCode(deckUrl, expectedCards, fetcher = fetch) {

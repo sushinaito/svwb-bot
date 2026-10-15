@@ -13,7 +13,9 @@ const env = { ...config.vars, ...secrets, FUN_API_TOKEN: fun.RENDER_API_TOKEN, D
 const budgetCtx = new FakeContext(), budget = new DailyBudget(budgetCtx, env); await budgetCtx.ready;
 env.BUDGET = { getByName: () => ({ fetch: (url, init) => budget.fetch(new Request(url, init)) }) };
 const ctx = new FakeContext(), conversation = new Conversation(ctx, env); await ctx.ready;
-const posts = [], sessions = new Set(), cases = process.argv.includes('--presentation') ? [
+const posts = [], sessions = new Set(), cases = process.argv.includes('--terms') ? [
+  ['幫我製作一張龍族6費5攻5血傳說 follower，卡名「曙光之龍」。用官方繁中能力名稱翻譯這段自訂效果：Fanfare: Draw a card. Last Words: Restore 2 defense to your leader. Invoke: At the start of your turn, if you have 10 play points, summon this card from your deck. 立繪留空，直接製作效果圖。', 'make_custom_card'],
+] : process.argv.includes('--presentation') ? [
   ['幫我製作一張龍族3費4攻5血傳說 follower，卡名「星火幼龍」，效果是 Fanfare: Draw a card.。整張用官方繁中術語，立繪留空，直接製作效果圖。', 'make_custom_card'],
 ] : process.argv.includes('--capability') ? [
   ['你能diy卡牌嗎', null],
@@ -53,8 +55,9 @@ try {
   };
   for (const [i, [text, expected]] of cases.entries()) {
     const before = posts.length;
+    const messageId = `fun-test-${Date.now()}-${i}`;
     await conversation.fetch(new Request('https://conversation/message', { method: 'POST', body: JSON.stringify({
-      id: `fun-test-${Date.now()}-${i}`, guildId: env.ALLOWED_GUILD_IDS.split(',')[0], channelId: 'local-only', authorId: 'test', authorName: '測試', text,
+      id: messageId, guildId: env.ALLOWED_GUILD_IDS.split(',')[0], channelId: 'local-only', authorId: 'test', authorName: '測試', text,
     }) }));
     for (let p = 0; p < 100; p++) {
       await conversation.alarm();
@@ -63,7 +66,7 @@ try {
       await new Promise(r => setTimeout(r, 1500));
     }
     const events = await eventsSince(env, old.id);
-    const own = events.findLastIndex(e => e.type === 'user.message');
+    const own = events.findIndex(e => e.type === 'user.message' && e.content?.some(b => b.text?.includes(messageId)));
     const calls = events.slice(own).filter(e => /tool_use$/.test(e.type));
     console.log(JSON.stringify({ case: i, expected, tools: calls.map(e => ({ name: e.name, input: e.input })), posts: posts.slice(before).map(p => ({ content: p.content, image: !!p.attachments || !!p.embeds?.[0]?.image })), blocked: conversation.state.blocked || null }));
     if (expected) assert.ok(calls.some(e => e.name === expected));
@@ -82,6 +85,12 @@ try {
       assert.doesNotMatch(card.effect, /登場|戰吼|Fanfare/i);
       assert.doesNotMatch(JSON.stringify(card), /[（(]\s*DIY\s*[)）]/i);
       assert.doesNotMatch(JSON.stringify(posts.slice(before)), /WB\s*製卡器|sva\.hypd\.asia|[（(]\s*DIY\s*[)）]/i);
+    }
+    if (process.argv.includes('--terms')) {
+      const card = conversation.state.lastFunCard.card;
+      for (const term of ['入場曲', '謝幕曲', '瞬念召喚']) assert.ok(card.effect.includes(term), `Missing ${term}`);
+      assert.doesNotMatch(card.effect, /Fanfare|Last Words|Invoke|戰吼|亡語|直接召喚|隨從/i);
+      await writeFile('.wrangler/terminology-custom-card.json', JSON.stringify({ card, posts: posts.slice(before) }, null, 2));
     }
     if (i === 3) assert.equal(conversation.state.lastFunCard.card.cost, 5);
   }

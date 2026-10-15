@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { publishDeckCode, cardSignature } from '../src/chat/decks.js';
-import { collectDeliveryDecks, deckPictures, sendDeckPictures } from '../src/chat/pictures.js';
+import { collectDeliveryDecks, deckPictures, sendDeckPictures, localizeDeckLinks } from '../src/chat/pictures.js';
 import { Conversation, userEvent } from '../src/chat/conversation.js';
 import { COMPLETION_SYSTEM, completionEvidence } from '../src/chat/completion.js';
 import { RESPONSE_STYLE } from '../src/chat/style.js';
 import { FakeContext, env, input } from './helpers.js';
+import { executeResearchTool } from '../src/chat/research.js';
 
 const hash = '1.1' + '.abcd'.repeat(40);
 const url = `https://shadowverse-wb.com/ja/deck/detail/?hash=${hash}`;
@@ -33,6 +34,28 @@ function portal({ mismatch = false, failure = false } = {}) {
   };
 }
 
+test('official hash source supplies the exact bilingual deck and effects before answer writing', async () => {
+  let reads = 0;
+  const fetcher = async (raw, init) => {
+    assert.equal(new URL(raw).pathname, '/web/DeckBuilder/deckHashDetail'); reads++;
+    const localized = structuredClone(data);
+    for (const card of Object.values(localized.card_details)) {
+      card.common.name = init.headers.lang === 'ja' ? '日本語名' : '官方繁中卡名';
+      card.common.skill_text = '<b>爆能強化</b> 4';
+    }
+    return Response.json({ data: localized });
+  };
+  const actual = await executeResearchTool('read_svwb_source', { url }, fetcher);
+  assert.equal(actual.status, 'ok'); assert.equal(actual.verification, 'official');
+  assert.equal(actual.totalCards, 40); assert.equal(reads, 2);
+  assert.equal(actual.cards[0].name, '官方繁中卡名');
+  assert.equal(actual.cards[0].nameJapanese, '日本語名');
+  assert.equal(actual.cards[0].text, '爆能強化 4');
+  assert.equal(collectDeliveryDecks(actual)[0].cards.length, 14);
+  assert.equal((await executeResearchTool('read_svwb_source', { url: url.replace(hash, '1.1.abcd') }, fetcher)).status, 'unavailable');
+  assert.equal(reads, 2);
+});
+
 test('official code is published with anonymous CSRF and checked against the same forty cards', async () => {
   assert.deepEqual(await publishDeckCode(url, cards, portal()), { status: 'ok', code: 'abcd' });
   for (const fetcher of [portal({ mismatch: true }), portal({ failure: true })])
@@ -55,6 +78,15 @@ test('delivery chooses only the exact linked build and retains tool-result card 
     [{ label: '精靈・節奏進化妖', deckUrl: url }]);
 });
 
+test('guide deck links survive final-writer evidence truncation with their source identity', () => {
+  const source = 'https://gamewith.jp/shadowverse-wb/507802';
+  const deliveryDecks = collectDeliveryDecks({ status: 'ok', source, text: '正文'.repeat(10000),
+    links: [{ title: 'Deck Portal', url }] });
+  assert.deepEqual(deliveryDecks, [{ deckUrl: url, label: '牌組', source }]);
+  const evidence = completionEvidence({ text: '來一套', deliveryDecks }, []);
+  assert.deepEqual(evidence.available_deck_links, deliveryDecks);
+});
+
 test('one Discord reply includes the PNG, verified code and permanent hash link', async t => {
   let payload, file;
   t.mock.method(globalThis, 'fetch', async (raw, init) => {
@@ -65,13 +97,32 @@ test('one Discord reply includes the PNG, verified code and permanent hash link'
   await sendDeckPictures(env, input('m1', { deliveryDecks: collectDeliveryDecks(result) }), url, portal());
   assert.match(payload.content, /`abcd`/);
   assert.match(payload.content, /hash=1\.1/);
-  assert.match(payload.content, /代碼可能失效/);
+  assert.match(payload.content, /若代碼失效/);
   assert.equal(file.type, 'image/png');
+});
+
+test('a delivered answer keeps one Chinese deck link while its attachment keeps the code and image', async t => {
+  const answer = localizeDeckLinks(`試試這套：[牌表](${url})。來源：https://gamewith.jp/shadowverse-wb/123`);
+  assert.equal((answer.match(/\/cht\/deck\/detail\//g) || []).length, 1);
+  assert.ok(answer.includes('https://gamewith.jp/shadowverse-wb/123'));
+  assert.equal(localizeDeckLinks('https://shadowverse-wb.com/ja/deck/cardslist/card/?card_id=12345678'), 'https://shadowverse-wb.com/ja/deck/cardslist/card/?card_id=12345678');
+  let payload;
+  t.mock.method(globalThis, 'fetch', async (raw, init) => {
+    payload = JSON.parse(init.body.get('payload_json'));
+    assert.equal(init.body.get('files[0]').type, 'image/png');
+    return Response.json({ id: 'sent' });
+  });
+  await sendDeckPictures(env, input(), answer, portal(), { linksInAnswer: true });
+  assert.match(payload.content, /`abcd`/);
+  assert.doesNotMatch(payload.content, /^1\./);
+  assert.ok(!payload.content.includes('https://'));
+  assert.match(payload.content, /上方的官方牌表/);
 });
 
 test('delivery errors remain retryable and existing conversations use the shared wording guidance', async t => {
   assert.ok(userEvent(input()).content[0].text.includes(RESPONSE_STYLE));
-  assert.ok(COMPLETION_SYSTEM.includes(RESPONSE_STYLE));
+  assert.match(COMPLETION_SYSTEM, /完整清單/);
+  assert.match(COMPLETION_SYSTEM, /只回答 current_question/);
   const ctx = new FakeContext(), conv = new Conversation(ctx, env); await ctx.ready;
   conv.state.sessionId = 'test';
   conv.state.current = { input: input(), answerParts: [url], baseline: 0 };

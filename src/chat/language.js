@@ -1,5 +1,7 @@
+export const requestsOtherLanguage = request => /(?:請|用|以|改成|回答|reply|respond|answer).{0,30}(?:英文|英語|日文|日語|English|Japanese)|(?:English|Japanese)\s*(?:please|only)|中日對照|日中對照|原文對照/i.test(request);
+
 export function needsChineseRewrite(answer, request) {
-  if (/(?:請|用|以|改成|回答|reply|respond|answer).{0,30}(?:英文|英語|日文|日語|English|Japanese)|(?:English|Japanese)\s*(?:please|only)/i.test(request)) return false;
+  if (requestsOtherLanguage(request)) return false;
   const prose = answer.replace(/https?:\/\/[^\s)]+/g, '')
     // Short quoted names and link labels can legitimately remain Japanese.
     .replace(/[「《〈]([^」》〉\n]{1,60})[」》〉]/g, (all, name) =>
