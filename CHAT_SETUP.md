@@ -82,6 +82,9 @@ Apply an intentional prompt change with
 `npm run chat:deploy`. The setup script stores and pins the new agent version.
 Existing conversations keep their original prompt; their starter can use
 `@電競魅魔 reset` to apply the new version to a fresh conversation.
+Every turn also includes a short language reminder, including existing sessions:
+summarize foreign-language search material in Taiwanese Traditional Chinese and
+include source links. Necessary proper names may remain in their original language.
 
 ## Operations
 
@@ -92,6 +95,10 @@ Existing conversations keep their original prompt; their starter can use
 - `node --env-file=.env.txt scripts/smoke-managed-agent.js`: a separate bounded
   API test, with no Discord messages. Its small API charge is outside the deployed
   bot's ledger. The script deletes its own test session afterward.
+- `node --env-file=.env.txt scripts/smoke-language.js [agent-version]`: bounded
+  live search/language regression test; checks for web search, Chinese output,
+  and long untranslated English passages. Also deletes its test
+  session and incurs a small API charge outside the bot ledger.
 
 Gateway reconnects use persisted Discord session/sequence state. Incoming messages
 are durably queued and deduplicated. Each conversation serializes turns and polls

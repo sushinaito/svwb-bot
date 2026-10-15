@@ -55,6 +55,10 @@ export function claude(env, path, method = 'GET', body, fetcher) {
 export const json = (data, status = 200) => Response.json(data, { status });
 export const ids = (value) => new Set(String(value || '').split(',').map(s => s.trim()).filter(Boolean));
 
+// Adjacent text blocks can split a sentence around citations. Preserve the
+// model's own whitespace instead of inserting a newline at every block boundary.
+export const messageText = content => (content || []).filter(b => b.type === 'text').map(b => b.text).join('');
+
 export function missingConfig(env) {
   const required = ['DISCORD_BOT_TOKEN', 'ANTHROPIC_API_KEY', 'CLAUDE_AGENT_ID', 'CLAUDE_ENVIRONMENT_ID', 'ALLOWED_GUILD_IDS'];
   return required.filter(k => !env[k]?.trim());

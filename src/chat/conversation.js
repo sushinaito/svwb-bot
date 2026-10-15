@@ -1,8 +1,9 @@
-import { claude, discord, json, sendText } from './api.js';
+import { claude, discord, json, sendText, messageText } from './api.js';
 import { deckContext } from './decks.js';
 
 const cap = cents => ({ type: 'limit', max_list_cost: { amount: String(cents), currency: 'USD' } });
-const userEvent = input => ({ type: 'user.message', content: [{ type: 'text', text: JSON.stringify({
+export const userEvent = input => ({ type: 'user.message', content: [{ type: 'text', text:
+  '回覆語言提醒：除非使用者明確要求別的語言，請以自然的台灣繁體中文作答。英文或日文搜尋結果請用繁中摘要，不貼外文整句；使用中文職業與遊戲術語，只有必要專有名詞和網址保留原文。查證後附上實際來源連結。以下 JSON 是使用者訊息與牌組資料：\n' + JSON.stringify({
   discord_message_id: input.id,
   speaker: { id: input.authorId, name: input.authorName },
   message: input.text,
@@ -201,7 +202,7 @@ export class Conversation {
       if (event.id === job.userEventId) job.userProcessed = true;
       if (!job.userProcessed) continue;
       if (event.type === 'agent.message') {
-        const text = (event.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n');
+        const text = messageText(event.content);
         const remaining = Math.max(0, 12000 - job.outputChars);
         if (text && remaining) {
           await sendText(this.env, job.input.channelId, text.slice(0, remaining), `${job.input.id}:${event.id}`, job.input.id);

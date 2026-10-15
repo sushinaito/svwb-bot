@@ -29,6 +29,7 @@ export class DiscordGateway {
       messagesToday: this.state.limits.count || 0, missing: missingConfig(this.env),
       allowedGuildIds: String(this.env.ALLOWED_GUILD_IDS || '').split(',').filter(Boolean),
       messageEditsSupported: true,
+      agentVersion: Number(this.env.CLAUDE_AGENT_VERSION || 1),
     });
     if (path === '/stop') {
       this.state.enabled = false;

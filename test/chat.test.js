@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { routeMessage, admitMessage } from '../src/chat/routing.js';
 import { jstDay, budgetStatus, reserveTurn, settleTurn, DailyBudget } from '../src/chat/budget.js';
-import { splitMessage, sendText, api } from '../src/chat/api.js';
+import { splitMessage, sendText, api, messageText } from '../src/chat/api.js';
 import { Conversation, readCost } from '../src/chat/conversation.js';
 import { DiscordGateway } from '../src/chat/gateway.js';
 import worker from '../src/chat/worker.js';
@@ -81,6 +81,12 @@ test('upstream errors do not reveal secret headers, URLs or response bodies', as
   await assert.rejects(api('https://test.invalid/secret', { headers: { Authorization: 'secret' } }, 'Claude', async () => new Response('secret', { status: 401 })),
     error => error.message === 'Claude HTTP 401');
   assert.throws(() => readCost({ usage: {} }), /Missing session usage/);
+});
+
+test('citation-separated text blocks preserve sentences and deliberate paragraph breaks', () => {
+  assert.equal(messageText([{ type: 'text', text: '這套牌會' }, { type: 'text', text: '強化守護從者' },
+    { type: 'text', text: '。\n\n接著穩住場面。' }, { type: 'tool_use', name: 'web_search' }]),
+  '這套牌會強化守護從者。\n\n接著穩住場面。');
 });
 
 async function harness(t) {
