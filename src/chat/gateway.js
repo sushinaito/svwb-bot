@@ -29,6 +29,7 @@ export class DiscordGateway {
       messagesToday: this.state.limits.count || 0, missing: missingConfig(this.env),
       allowedGuildIds: String(this.env.ALLOWED_GUILD_IDS || '').split(',').filter(Boolean),
       messageEditsSupported: true,
+      botRoleMentionsSupported: true,
       agentVersion: Number(this.env.CLAUDE_AGENT_VERSION || 1),
     });
     if (path === '/stop') {
@@ -210,8 +211,8 @@ export class DiscordGateway {
     if (typeof update.content !== 'string' || !update.edited_timestamp || !update.id || !update.channel_id) return;
     if (this.state.limits.seen?.includes(update.id) || this.state.pending.some(m => m.id === update.id)) return;
     if (update.author?.bot || update.webhook_id) return;
-    if (!update.mentions?.some(u => u.id === this.state.botId) && !this.state.threads[update.channel_id] &&
-        !new RegExp(`<@!?${this.state.botId}>`).test(update.content)) return;
+    if (!update.mentions?.some(u => u.id === this.state.botId) && !update.mention_roles?.length && !this.state.threads[update.channel_id] &&
+          !new RegExp(`<@!?${this.state.botId}>`).test(update.content) && !/<@&\d+>/.test(update.content)) return;
     // Update payloads can omit author/type/mentions. Fetch the complete current
     // message and route it through the same guild, author and budget guards.
     let message;
@@ -224,6 +225,7 @@ export class DiscordGateway {
   async receive(message) {
     if (!message.guild_id || !String(this.env.ALLOWED_GUILD_IDS).split(',').map(s => s.trim()).includes(message.guild_id)) return;
     if (message.author?.bot || message.webhook_id || !message.content) return;
+    message = await this.normalizeBotRoleMention(message);
     const mentioned = message.mentions?.some(u => u.id === this.state.botId);
     for (const [id, entry] of Object.entries(this.state.threads)) if (entry.expires < Date.now()) delete this.state.threads[id];
     if (!mentioned && !this.state.threads[message.channel_id]) return;
@@ -269,5 +271,21 @@ export class DiscordGateway {
       this.state.pending = this.state.pending.filter(m => m.id !== input.id);
       await this.save();
     }
+  }
+
+  async normalizeBotRoleMention(message) {
+    if (!message.mention_roles?.length || message.mentions?.some(u => u.id === this.state.botId)) return message;
+    this.state.botRoles ||= {};
+    let entry = this.state.botRoles[message.guild_id];
+    if (!entry || Date.now() - entry.checkedAt > 3600000) {
+      const roles = await discord(this.env, `/guilds/${message.guild_id}/roles`);
+      entry = { checkedAt: Date.now(), ids: roles.filter(r => r.managed && r.tags?.bot_id === this.state.botId).map(r => r.id) };
+      this.state.botRoles[message.guild_id] = entry;
+    }
+    const matched = entry.ids.filter(id => message.mention_roles.includes(id));
+    if (!matched.length) return message;
+    let content = message.content;
+    for (const id of matched) content = content.replaceAll(`<@&${id}>`, `<@${this.state.botId}>`);
+    return { ...message, content, mentions: [...(message.mentions || []), { id: this.state.botId }] };
   }
 }

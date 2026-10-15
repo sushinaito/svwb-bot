@@ -101,6 +101,16 @@ include source links. Necessary proper names may remain in their original langua
 
 ## Operations
 
+Bot user mentions and its own Discord-managed bot role both trigger chat and
+`reset`. Other roles do not. If `reset` succeeds the bot explicitly confirms
+the history was cleared; a missed reset does not change the pinned agent version.
+
+Class-specific deck/meta questions also read SVWB Meta's public manifest and
+versioned JSON, so answers do not depend on Claude being able to render its page.
+The adapter supplies the 14-day sample window, Traditional Chinese archetype/card
+names and at most two example lists. Sample shares are not win rates. Fetches are
+bounded and failures are explicit; it does not scrape private or logged-in data.
+
 - `npm run chat:status`: connection state, missing configuration, daily budget.
 - `npm run chat:stop`: stop the Gateway and new incoming messages. In-flight
   conversations may finish within their existing budget reservations.
@@ -112,6 +122,9 @@ include source links. Necessary proper names may remain in their original langua
   live search/language regression test; checks for web search, Chinese output,
   and long untranslated English passages. Also deletes its test
   session and incurs a small API charge outside the bot ledger.
+- `node --env-file=.env.txt scripts/smoke-meta.js [agent-version]`: checks live
+  Dragon data and a Chinese answer using the supplied data, with a 20-cent session
+  cap. Deletes the test session; its usage is outside the bot ledger.
 
 Gateway reconnects use persisted Discord session/sequence state. Incoming messages
 are durably queued and deduplicated. Each conversation serializes turns and polls

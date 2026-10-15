@@ -256,6 +256,29 @@ test('edit handling skips embed-only updates, other guilds and fetched bot messa
   assert.equal(gateway.state.pending.length, 0);
 });
 
+test('mentioning the bot-managed role routes reset but unrelated roles do not', async t => {
+  const ctx = new FakeContext(), gateway = new DiscordGateway(ctx, env); await ctx.ready;
+  gateway.state.botId = '999';
+  let roleFetches = 0;
+  t.mock.method(globalThis, 'fetch', async raw => {
+    if (new URL(raw).pathname.endsWith('/messages/edited-role')) return Response.json(message({ id: 'edited-role', content: '<@&777> reset', mentions: [], mention_roles: ['777'] }));
+    if (new URL(raw).pathname.endsWith('/roles')) {
+      roleFetches++;
+      return Response.json([{ id: '777', managed: true, tags: { bot_id: '999' } }, { id: '888', name: 'Other' }]);
+    }
+    return Response.json({ type: 0 });
+  });
+  await gateway.receive(message({ id: 'other-role', content: '<@&888> reset', mentions: [], mention_roles: ['888'] }));
+  assert.equal(gateway.state.pending.length, 0);
+  await gateway.receive(message({ content: '<@&777> reset', mentions: [], mention_roles: ['777'] }));
+  assert.equal(gateway.state.pending.length, 1);
+  assert.equal(gateway.state.pending[0].command, 'reset');
+  await gateway.receiveEdit({ id: 'edited-role', guild_id: '123', channel_id: '456', content: '<@&777> reset', edited_timestamp: '2026-10-15T06:08:24Z' });
+  assert.equal(gateway.state.pending.length, 2);
+  assert.equal(gateway.state.pending[1].command, 'reset');
+  assert.equal(roleFetches, 1);
+});
+
 test('agent spec pins Haiku 5.5 and only enables web tools', async () => {
   const spec = JSON.parse(await readFile(new URL('../claude/agent.json', import.meta.url), 'utf8'));
   assert.equal(spec.model.id, 'claude-haiku-5-5');
