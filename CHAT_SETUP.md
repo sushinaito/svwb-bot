@@ -20,6 +20,14 @@ original `wrangler.toml` to deploy this feature.
 - Mention the bot once inside a thread. Everyone in that thread can then chat
   without mentioning it again. The thread shares one conversation history.
 - Thread participation expires after 24 hours without an accepted message.
+- Each Discord user has a separate persistent Managed Agents memory store for
+  self-stated preferences, goals, crafting budgets, and response style. The same
+  user reuses their store across channels, allowed servers, new conversations,
+  compaction, and conversation reset. A different person replying shares the
+  discussion but reads and updates their own personal memory, not its starter's.
+- Users can say `記住我喜歡龍族`, `你記得我什麼`, `忘記我的合成預算`, or
+  `忘記我的所有個人記憶`. Only successful memory-tool results may be acknowledged
+  as saved/forgotten. Personal memory does not archive full transcripts or images.
 - The person who activated a thread can send `@電競魅魔 stop` to stop automatic
   replies, or `@電競魅魔 reset` to delete its Claude history and start fresh.
   Stopping participation allows already queued replies to finish.
@@ -66,13 +74,48 @@ original `wrangler.toml` to deploy this feature.
   link. Follow-up turns retain that deck. Failed lookups ask for a valid code or
   pasted list; codes are never interpreted as guessed deck contents.
 
-## Model and budget
+## Model
 
 The dedicated agent uses **claude-haiku-5-5** with **high effort** and standard
 speed, pinned to a specific agent version. Effort is fixed for each session:
 use `@電競魅魔 reset` once in an existing conversation to start using the new
 effort setting (this clears that conversation's history).
 No subagents, advisors, shell, filesystem, or MCP tools are enabled.
+
+## Personal memory
+
+Memory contents live in Anthropic's Managed Agents memory stores. A per-user
+`PersonalMemory` Durable Object keeps the Discord-ID-to-store mapping and
+serializes access from concurrent conversations. Its storage has no expiry;
+conversation reset never deletes the mapping or cloud profile. Each cloud profile
+holds at most 24 short facts, with the latest eight supplied as a turn preview.
+The model can request the complete profile, update an existing key, or forget facts.
+Facts and their supporting current-message quotes are saved separately from the
+conversation summary; no backfill from old conversations is performed.
+
+Personal stores are accessed through custom tools rather than mounted in shared
+agent sandboxes. Store mounts cannot be switched after session creation. The
+broker always derives ownership from the accepted message's `authorId`; tool
+arguments cannot select a user or store. Compaction cannot write personal memory.
+Memory reads/writes use the `agent-memory-2026-07-22` beta header, while session
+requests continue to use `managed-agents-2026-04-01`.
+
+Cloud profile updates use content-hash preconditions and operation IDs so
+concurrent writes and retries do not erase newer data. Ambiguous store creation
+is reconciled using store metadata instead of blindly creating a duplicate.
+Failures leave ordinary chat available and never claim memory was saved.
+Memory is personalization data, not a place to store secrets: shared discussions
+still retain their public conversation context and previously supplied preferences.
+Forgetting removes live profile facts; Anthropic retains historical memory versions
+under its own version-retention policy. The service is in beta; see
+[Managed Agents memory documentation](https://platform.claude.com/docs/en/managed-agents/memory).
+
+Run `node scripts/smoke-personal-memory.js` for a live API check using synthetic
+users, temporary stores, and intercepted Discord delivery. It verifies distinct
+profiles in a shared agent session, fresh-session recall, compaction, reset,
+object restart, and isolated forgetting, then deletes its temporary resources.
+
+## Budget
 
 One global Durable Object enforces a **$2/day AI list-cost budget**, resetting at
 **00:00 Asia/Tokyo**. Each turn reserves 20 cents plus a two-cent rounding margin

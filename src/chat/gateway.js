@@ -1,6 +1,7 @@
 import { discord, json, missingConfig, sendText } from './api.js';
 import { routeMessage, admitMessage, THREAD_TYPES, isReplyToBot, referencedMessage } from './routing.js';
 import { FUN_VERSION } from './fun.js';
+import { PERSONAL_MEMORY_VERSION } from './personal-memory.js';
 
 // One outbound Gateway connection for this Discord application. Outbound sockets
 // cannot hibernate; the alarm restores the connection after deploys/eviction.
@@ -84,6 +85,7 @@ export class DiscordGateway {
       botRoleMentionsSupported: true,
       directRepliesSupported: true,
       sharedReplyContextVersion:1,
+      personalMemoryVersion: this.env.PERSONAL_MEMORY ? PERSONAL_MEMORY_VERSION : 0,
       deckPicturesSupported: true,
       officialCardLookupSupported: true,
       strategyGuidesSupported: true,

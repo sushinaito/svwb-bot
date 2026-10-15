@@ -54,7 +54,7 @@ export function claude(env, path, method = 'GET', body, fetcher) {
     headers: {
       'x-api-key': env.ANTHROPIC_API_KEY,
       'anthropic-version': '2023-06-01',
-      'anthropic-beta': 'managed-agents-2026-04-01',
+      'anthropic-beta': path.startsWith('/memory_stores') ? 'agent-memory-2026-07-22' : 'managed-agents-2026-04-01',
       'Content-Type': 'application/json',
     },
     body: body === undefined ? undefined : JSON.stringify(body),

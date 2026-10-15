@@ -10,6 +10,7 @@ export { DiscordGateway } from './gateway.js';
 export { Conversation } from './conversation.js';
 export { DailyBudget } from './budget.js';
 export { DeckLibrary } from './deck-library.js';
+export { PersonalMemory } from './personal-memory.js';
 
 export default {
   async fetch(request, env) {

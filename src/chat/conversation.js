@@ -21,8 +21,10 @@ import preferredSources from '../../claude/sources.json' with { type: 'json' };
 import { COMPLETION_SYSTEM, completionEvidence } from './completion.js';
 import { FUN_TOOLS, FUN_GUIDANCE, FUN_VERSION, isFunTool, executeFunTool } from './fun.js';
 import { requestedCustomCard, deliveredCustomCard, CARD_COMPLETION_VERSION, CARD_COMPLETION_TOOLS, CARD_COMPLETION_SYSTEM, renderedCardAnswer } from './card-completion.js';
+import { MEMORY_TOOLS, MEMORY_GUIDANCE, PERSONAL_MEMORY_VERSION, isMemoryTool, personalMemory, memoryPreview, executeMemoryTool } from './personal-memory.js';
 
 const cap = cents => ({ type: 'limit', max_list_cost: { amount: String(cents), currency: 'USD' } });
+const mainTools = [...agentSpec.tools, ...FUN_TOOLS, ...MEMORY_TOOLS];
 export const userEvent = input => ({ type: 'user.message', content: [{ type: 'text', text:
   '今天（日本時間）是 ' + new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10) + '。查「現在／最新／下次」必須核對事件年份，不能把來源的舊月日套進今年。\n' +
   RESEARCH_GUIDANCE + RESPONSE_STYLE +
@@ -33,6 +35,7 @@ export const userEvent = input => ({ type: 'user.message', content: [{ type: 'te
   discord_message_id: input.id,
   current_date_jst: new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10),
   speaker: { id: input.authorId, name: input.authorName },
+  ...(input.personalMemory ? { personal_memory: input.personalMemory } : {}),
   ...(input.sharedReply?{joined_original_conversation:true}:{}),
   message: input.text,
   terminology: relevantTerminology(input.text),
@@ -161,10 +164,20 @@ export class Conversation {
         rendererAuthenticated = probe.status === 405;
         await probe.body?.cancel();
       } catch { /* Keep deployment health readable while the service updates. */ }
-      return json({ funVersion: FUN_VERSION, tools: [...agentSpec.tools, ...FUN_TOOLS].map(t => t.name || t.type),
+      let personalMemoryAuthenticated = false;
+      if (this.env.PERSONAL_MEMORY) try {
+        const probe = await this.env.PERSONAL_MEMORY.getByName('runtime-status').fetch('https://memory/capabilities');
+        if (probe.ok) {
+          const status = await probe.json();
+          personalMemoryAuthenticated = status.version === PERSONAL_MEMORY_VERSION && status.cloudApiAccessible;
+        } else await probe.body?.cancel();
+      } catch { /* Probe the deployed memory object and cloud API without reading a user's profile. */ }
+      return json({ funVersion: FUN_VERSION, tools: mainTools.map(t => t.name || t.type),
         rendererConfigured, rendererAuthenticated, catalogBatching: true, deckDeliveryVersion: 2, naturalResponseStyle: true,
         responseEditing: true, progressReplyVersion: 2, cardDatabase: cardCache.metadata, packDatabase: packMetadata,
         deckDatabase: await deckLibraryStatus(this.env), deckCacheVersion: 2, cardCompletionVersion:CARD_COMPLETION_VERSION,sharedReplyContextVersion:1,
+        personalMemoryVersion: this.env.PERSONAL_MEMORY ? PERSONAL_MEMORY_VERSION : 0, personalMemoryStorage: 'managed_agents_memory_store',
+        personalMemoryAuthenticated,
         terminologyCount: TERMINOLOGY_COUNT, terminologyStorage: 'bundled_json' });
     }
     const input = await request.json();
@@ -276,6 +289,10 @@ export class Conversation {
       return;
     }
     if (job.phase === 'prepare') {
+      if (!job.input.personalMemory && this.env.PERSONAL_MEMORY) {
+        job.input.personalMemory = memoryPreview(await personalMemory(this.env, job.input));
+        await this.save();
+      }
       if (this.state.lastCompletedAnswer) job.input.lastCompletedAnswer = this.state.lastCompletedAnswer;
       job.input.deckDatabase = await deckLibraryStatus(this.env);
       if (!job.input.decks) job.input.decks = await deckContext(job.input.text);
@@ -343,7 +360,7 @@ export class Conversation {
       await this.save();
       const session = await claude(this.env, '/sessions', 'POST', {
         agent: { type: 'agent_with_overrides', id: this.env.CLAUDE_AGENT_ID, version: Number(this.env.CLAUDE_AGENT_VERSION || 1),
-          tools: [...agentSpec.tools, ...FUN_TOOLS] },
+          tools: mainTools },
         environment_id: this.env.CLAUDE_ENVIRONMENT_ID,
         title: `Discord ${job.input.thread ? 'thread' : 'conversation'} ${job.input.channelId}`,
         budget: cap(job.capCents),
@@ -352,6 +369,7 @@ export class Conversation {
       this.state.funToolsVersion = FUN_VERSION;
       this.state.researchToolsVersion = 7;
       this.state.researchPolicyVersion = 2;
+      this.state.memoryToolsVersion = PERSONAL_MEMORY_VERSION;
       if (this.state.summary) job.input.memory = this.state.summary;
       job.phase = 'send';
       await this.save();
@@ -363,9 +381,10 @@ export class Conversation {
     if (job.phase === 'update-budget') {
       // Tools can be updated while idle without replacing the session/history.
       await claude(this.env, `/sessions/${this.state.sessionId}`, 'POST', { budget: cap(job.capCents),
-        ...(this.state.researchToolsVersion !== 7 || this.state.funToolsVersion !== FUN_VERSION ? { agent: { tools: [...agentSpec.tools, ...FUN_TOOLS] } } : {}) });
+        ...(this.state.researchToolsVersion !== 7 || this.state.funToolsVersion !== FUN_VERSION || this.state.memoryToolsVersion !== PERSONAL_MEMORY_VERSION ? { agent: { tools: mainTools } } : {}) });
       this.state.funToolsVersion = FUN_VERSION;
       this.state.researchToolsVersion = 7;
+      this.state.memoryToolsVersion = PERSONAL_MEMORY_VERSION;
       job.phase = 'send';
       await this.save();
     }
@@ -423,7 +442,7 @@ export class Conversation {
         events: job.finalizePending ? [event, { type: 'system.message', content: [{ type: 'text', text: '僅此則收尾回答：根據已有證據直接用自然台灣繁中回答，約300～600字元。引用只能附來源連結，不能貼英文或日文原句。專名可保留原文。不要再搜尋或呼叫工具；先給能確認的結論，再精確指出缺口。下一輪恢復正常查證。' }] }] : [event,
           ...(this.state.researchPolicyVersion === 2 && job.compacting ? [] : [{ type: 'system.message', content: [{ type: 'text', text:
             (this.state.researchPolicyVersion === 2 ? '' : '查證流程更新：以此通用流程取代先前針對個別問題的查詢指引。\n' + RESEARCH_GUIDANCE) +
-            (job.compacting ? '' : FUN_GUIDANCE + RESPONSE_STYLE + (this.state.terminologyVersion === 1 ? '' : TERMINOLOGY_GUIDANCE)) }] }])],
+            (job.compacting ? '' : FUN_GUIDANCE + MEMORY_GUIDANCE + RESPONSE_STYLE + (this.state.terminologyVersion === 1 ? '' : TERMINOLOGY_GUIDANCE)) }] }])],
       }); }
       catch (error) {
         if (imageBlocks.length && [400,413].includes(error.status)) {
@@ -503,7 +522,7 @@ export class Conversation {
         // Only persist small markers. Source bodies need not be stored in the
         // Durable Object: reads are repeatable and result IDs are API-idempotent.
         if (!job.toolResults[event.id]) {
-          const local=isLocalResearch(event.name,event.input);
+          const local=isLocalResearch(event.name,event.input) || isMemoryTool(event.name);
           job.toolResults[event.id] = { allowed: event.name === 'report_svwb_progress' || (local
             ? Object.values(job.toolResults).filter(t=>t.local).length<24
             : Object.values(job.toolResults).filter(t=>!t.progress && !t.local).length<8),
@@ -515,7 +534,8 @@ export class Conversation {
         }
         if (!job.toolResults[event.id].sent) {
           const result = job.toolResults[event.id].allowed
-            ? event.name === 'report_svwb_progress' ? await this.progress(event.input?.message) : isFunTool(event.name)
+            ? event.name === 'report_svwb_progress' ? await this.progress(event.input?.message) : isMemoryTool(event.name)
+              ? await executeMemoryTool(this.env, event, job) : isFunTool(event.name)
               ? await executeFunTool(this.outputEnv, event, job, this.state, () => this.save())
               : await executeResearchTool(event.name, event.input, fetch, this.env)
             : { status: 'unavailable', message: '本輪直接查詢次數已用完，請依已有資料作答並標明缺口。' };

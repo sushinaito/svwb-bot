@@ -4,6 +4,7 @@ import { claude, discord } from '../src/chat/api.js';
 import { FUN_TOOLS, FUN_GUIDANCE } from '../src/chat/fun.js';
 import { RESPONSE_STYLE } from '../src/chat/style.js';
 import { TERMINOLOGY_GUIDANCE } from '../src/chat/terminology.js';
+import { MEMORY_TOOLS, MEMORY_GUIDANCE } from '../src/chat/personal-memory.js';
 
 async function main() {
   for (const name of ['ANTHROPIC_API_KEY', 'DISCORD_BOT_TOKEN']) if (!process.env[name]) throw new Error(`Missing ${name}`);
@@ -11,8 +12,9 @@ async function main() {
   if (!(app.flags & ((1 << 18) | (1 << 19)))) throw new Error('Enable Message Content Intent in Discord Developer Portal first');
   const agentSpec = JSON.parse(await readFile(new URL('../claude/agent.json', import.meta.url), 'utf8'));
   agentSpec.system = await readFile(new URL('../claude/system-prompt.md', import.meta.url), 'utf8');
-  agentSpec.tools = [...agentSpec.tools, ...FUN_TOOLS];
+  agentSpec.tools = [...agentSpec.tools, ...FUN_TOOLS, ...MEMORY_TOOLS];
   agentSpec.system += '\n\n' + FUN_GUIDANCE;
+  agentSpec.system += '\n\n' + MEMORY_GUIDANCE;
   agentSpec.system += '\n\n' + RESPONSE_STYLE + TERMINOLOGY_GUIDANCE;
   const sources = JSON.parse(await readFile(new URL('../claude/sources.json', import.meta.url), 'utf8'));
   agentSpec.system += '\n\n## 優先查閱來源\n' + sources.map(s => `- ${s.name}：${s.url}\n  用途：${s.use_for}`).join('\n');
