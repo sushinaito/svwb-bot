@@ -159,11 +159,12 @@ async function harness(t, answers = [], options = {}) {
       return Response.json({ id: `reply_${replies.length}` });
     }
     if (url.pathname === '/v1/sessions' && init.method === 'POST') {
-      if (body.agent.type === 'agent_with_overrides') {
+      if (body.agent.type === 'agent_with_overrides' && body.agent.tools?.length === 0) {
         completion = { id: 'sesn_completion', status: 'idle', budget: body.budget, events: [], usage: { list_cost: { currency: 'USD', amount: '0' } } };
         return Response.json({ id: completion.id });
       }
       sessionCount++;
+      if (body.agent.tools) sessionTools = body.agent.tools;
       sessionBudget = body.budget;
       if (sessionCount > 1) usage = 0;
       events.push({ id: 'initial-idle', type: 'session.status_idle', stop_reason: { type: 'end_turn' }, processed_at: stamp() });
@@ -238,7 +239,10 @@ test('two conversational turns reuse the pinned agent session and never replay o
   assert.equal(h.replies.length, 2);
   const creates = h.calls.filter(c => c.path === '/v1/sessions' && c.method === 'POST');
   assert.equal(creates.length, 1);
-  assert.deepEqual(creates[0].body.agent, { type: 'agent', id: 'agent_test', version: 1 });
+  const createdAgent = creates[0].body.agent;
+  assert.equal(createdAgent.type, 'agent_with_overrides');
+  assert.equal(createdAgent.id, 'agent_test'); assert.equal(createdAgent.version, 1);
+  assert.ok(createdAgent.tools.some(tool => tool.name === 'make_custom_card'));
   assert.equal(creates[0].body.budget.max_list_cost.amount, '20');
   assert.ok(h.calls.some(c => c.path === '/v1/sessions/sesn_test' && c.method === 'POST' && c.body.budget.max_list_cost.amount === '22'));
   assert.equal(budgetStatus(h.budget.state, env).accountedCents, 6);
@@ -526,6 +530,7 @@ test('existing conversations receive new tools without replacing their session o
   assert.equal(h.calls.filter(c => c.path === '/v1/sessions' && c.method === 'POST').length, 1);
   const update = h.calls.find(c => c.body?.agent?.tools);
   assert.ok(update.body.agent.tools.some(t => t.name === 'read_svwb_source'));
+  assert.ok(update.body.agent.tools.some(t => t.name === 'roll_dice'));
   assert.equal(h.conversation.state.researchToolsVersion, 3);
   assert.ok(h.calls.some(c => c.body?.events?.at(-1)?.type === 'system.message'));
 });

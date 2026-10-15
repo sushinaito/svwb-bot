@@ -4,6 +4,7 @@
   "main": "src/chat/worker.js",
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
+  "services": [{ "binding": "FUN", "service": "svwb-fun-bot" }],
   "durable_objects": {
     "bindings": [
       { "name": "GATEWAY", "class_name": "DiscordGateway" },
