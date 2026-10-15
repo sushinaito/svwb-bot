@@ -4,6 +4,7 @@
   "main": "src/chat/worker.js",
   "compatibility_date": "2026-10-01",
   "workers_dev": true,
+  "services": [{ "binding": "FUN", "service": "svwb-fun-bot" }],
   "durable_objects": {
     "bindings": [
       { "name": "GATEWAY", "class_name": "DiscordGateway" },
@@ -21,6 +22,7 @@
     "CLAUDE_AGENT_VERSION": "1",
     "DAILY_BUDGET_CENTS": "200",
     "TURN_BUDGET_CENTS": "20",
+    "ANSWER_RESERVE_CENTS": "4",
     "BUDGET_MARGIN_CENTS": "10",
     "DAILY_MESSAGE_LIMIT": "100",
     "THREAD_IDLE_HOURS": "24",

@@ -147,32 +147,66 @@ async function harness(t, answers = [], options = {}) {
   const conversation = new Conversation(ctx, localEnv);
   await ctx.ready;
   const calls = [], replies = [], events = [];
-  let sequence = 0, usage = 0, autoAnswer = true, sessionCount = 0;
+  let sequence = 0, usage = 0, autoAnswer = true, sessionCount = 0, sessionBudget, sessionTools = [{ type: 'agent_toolset_20260401' }], resumeRunning = false, completion;
   const stamp = () => `2026-10-15T05:00:${String(++sequence).padStart(2, '0')}.000Z`;
   t.mock.method(globalThis, 'fetch', async (raw, init = {}) => {
     const url = new URL(raw), body = init.body ? JSON.parse(init.body) : undefined;
     calls.push({ path: url.pathname, method: init.method, body });
+    if (url.hostname === 'gamewith.jp') return new Response('<main><h1>規則說明</h1><p>' + '規則正文。'.repeat(40) + '</p></main>', { headers: { 'Content-Type': 'text/html' } });
     if (url.hostname === 'cdn.discordapp.com') return new Response(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC','base64'), { headers: { 'Content-Type': 'image/png' } });
     if (url.hostname === 'discord.com') {
       if (url.pathname.endsWith('/messages')) replies.push(body.content);
       return Response.json({ id: `reply_${replies.length}` });
     }
     if (url.pathname === '/v1/sessions' && init.method === 'POST') {
+      if (body.agent.type === 'agent_with_overrides' && body.agent.tools?.length === 0) {
+        completion = { id: 'sesn_completion', status: 'idle', budget: body.budget, events: [], usage: { list_cost: { currency: 'USD', amount: '0' } } };
+        return Response.json({ id: completion.id });
+      }
       sessionCount++;
+      if (body.agent.tools) sessionTools = body.agent.tools;
+      sessionBudget = body.budget;
       if (sessionCount > 1) usage = 0;
       events.push({ id: 'initial-idle', type: 'session.status_idle', stop_reason: { type: 'end_turn' }, processed_at: stamp() });
       return Response.json({ id: sessionCount === 1 ? 'sesn_test' : `sesn_test_${sessionCount}` });
     }
+    if (url.pathname.startsWith('/v1/sessions/sesn_completion')) {
+      if (init.method === 'DELETE') return new Response(null,{status:204});
+      if (url.pathname.endsWith('/events')) {
+        if (init.method === 'POST') {
+          const submitted = body.events.map(e=>({...e,id:`completion_${sequence}`,processed_at:stamp()}));
+          completion.events.push(...submitted,
+            {id:'completed',type:'agent.message',content:[{type:'text',text:answers.shift() || '整理後的繁中答案'}],processed_at:stamp()},
+            {id:'completion-idle',type:'session.status_idle',stop_reason:{type:'end_turn'},processed_at:stamp()});
+          completion.usage.list_cost.amount='2';
+          if (options.loseCompletionResponse) { options.loseCompletionResponse=false; throw Error('Lost completion response'); }
+          return Response.json({data:submitted});
+        }
+        return Response.json({data:completion.events,next_page:null});
+      }
+      return Response.json(completion);
+    }
     if (url.pathname.endsWith('/events') && init.method === 'POST') {
       if (options.rejectImages && body.events[0].content?.some(b => b.type === 'image')) return new Response(null, { status: 400 });
-      const event = { ...body.events[0], id: `user_${sequence}`, processed_at: stamp() };
-      events.push(event);
+      const accepted = [];
+      for (const submitted of body.events) {
+      const event = { ...submitted, id: `user_${sequence}`, processed_at: stamp() };
+      events.push(event); accepted.push(event);
+      if (event.type === 'user.interrupt') {
+        resumeRunning = false;
+        events.push({ id: `idle_${sequence}`, type: 'session.status_idle', processed_at: stamp(), stop_reason: { type: 'interrupted' } });
+      }
+      if (event.type === 'user.custom_tool_result' && options.loseToolResponse) {
+        options.loseToolResponse = false;
+        throw Error('Connection lost after acceptance');
+      }
       if (autoAnswer && event.type === 'user.message') {
         events.push({ id: `reply_${sequence}`, type: 'agent.message', processed_at: stamp(), content: [{ type: 'text', text: answers.shift() || `Answer ${sequence}` }] });
         events.push({ id: `idle_${sequence}`, type: 'session.status_idle', processed_at: stamp(), stop_reason: { type: 'end_turn' } });
         usage += 2;
       }
-      return Response.json({ data: [event] });
+      }
+      return Response.json({ data: accepted });
     }
     if (url.pathname.endsWith('/events')) {
       const since = url.searchParams.get('created_at[gte]');
@@ -180,10 +214,18 @@ async function harness(t, answers = [], options = {}) {
     }
     if (init.method === 'DELETE') return new Response(null, { status: 204 });
     assert.ok(['GET', 'POST'].includes(init.method), 'Session updates must use POST');
-    return Response.json({ id: 'sesn_test', status: 'idle', usage: { list_cost: { currency: 'USD', amount: String(usage) } } });
+    if (body?.budget) sessionBudget = body.budget;
+    if (body?.agent?.tools) sessionTools = body.agent.tools;
+    if (options.resumeAtCap && body?.agent?.tools?.length === 0) {
+      resumeRunning = true;
+      events.push({ id: `reply_${sequence}`, type: 'agent.message', processed_at: stamp(), content: [{ type: 'text', text: '舊研究草稿' }] });
+      events.push({ id: `idle_${sequence}`, type: 'session.status_idle', processed_at: stamp(), stop_reason: { type: 'end_turn' } });
+      usage += 2;
+    }
+    return Response.json({ id: 'sesn_test', status: resumeRunning ? 'running' : 'idle', budget: sessionBudget, agent: { tools: sessionTools }, usage: { list_cost: { currency: 'USD', amount: String(usage) } } });
   });
   const enqueue = data => conversation.fetch(new Request('https://conversation/message', { method: 'POST', body: JSON.stringify(data) }));
-  return { conversation, ctx, localEnv, budget, calls, replies, events, enqueue, setAutoAnswer: value => { autoAnswer = value; } };
+  return { conversation, ctx, localEnv, budget, calls, replies, events, enqueue, setAutoAnswer: value => { autoAnswer = value; }, setUsage: value => { usage = value; } };
 }
 
 test('two conversational turns reuse the pinned agent session and never replay old answers', async t => {
@@ -197,7 +239,10 @@ test('two conversational turns reuse the pinned agent session and never replay o
   assert.equal(h.replies.length, 2);
   const creates = h.calls.filter(c => c.path === '/v1/sessions' && c.method === 'POST');
   assert.equal(creates.length, 1);
-  assert.deepEqual(creates[0].body.agent, { type: 'agent', id: 'agent_test', version: 1 });
+  const createdAgent = creates[0].body.agent;
+  assert.equal(createdAgent.type, 'agent_with_overrides');
+  assert.equal(createdAgent.id, 'agent_test'); assert.equal(createdAgent.version, 1);
+  assert.ok(createdAgent.tools.some(tool => tool.name === 'make_custom_card'));
   assert.equal(creates[0].body.budget.max_list_cost.amount, '20');
   assert.ok(h.calls.some(c => c.path === '/v1/sessions/sesn_test' && c.method === 'POST' && c.body.budget.max_list_cost.amount === '22'));
   assert.equal(budgetStatus(h.budget.state, env).accountedCents, 6);
@@ -449,5 +494,120 @@ test('agent spec pins Haiku 5.5 and only enables web tools', async () => {
   assert.equal(spec.model.effort.type, 'high');
   assert.equal(spec.tools[0].default_config.enabled, false);
   assert.deepEqual(spec.tools[0].configs.map(c => c.name), ['web_search', 'web_fetch']);
+  assert.deepEqual(spec.tools.slice(1).map(c => c.name), ['read_svwb_source', 'query_svwb_data']);
   assert.equal(spec.multiagent, undefined);
+});
+
+test('custom research resumes through requires_action and retries ambiguous results without extra budget', async t => {
+  const h = await harness(t, [], { loseToolResponse: true }); h.setAutoAnswer(false);
+  await h.enqueue(input('research')); await h.conversation.alarm();
+  h.events.push({ id: 'progress', type: 'agent.message', processed_at: '2026-10-15T05:01:00Z', content: [{ type: 'text', text: '我先查一下。' }] },
+    { id: 'tool1', type: 'agent.custom_tool_use', name: 'read_svwb_source', input: { url: 'https://gamewith.jp/shadowverse-wb/123' }, processed_at: '2026-10-15T05:01:01Z' },
+    { id: 'wait-tool', type: 'session.status_idle', stop_reason: { type: 'requires_action', event_ids: ['tool1'] }, processed_at: '2026-10-15T05:01:02Z' });
+  await h.conversation.alarm();
+  assert.equal(h.conversation.state.current.toolResults.tool1.sent, false);
+  h.conversation = new Conversation(h.ctx, h.localEnv); await h.ctx.ready;
+  await h.conversation.alarm();
+  assert.equal(h.conversation.state.current.phase, 'poll');
+  assert.equal(h.conversation.state.blocked, undefined);
+  const results = h.calls.filter(c => c.body?.events?.[0]?.type === 'user.custom_tool_result');
+  assert.equal(results.length, 2); assert.ok(results.every(c => c.body.events[0].custom_tool_use_id === 'tool1'));
+  assert.equal(JSON.parse(results[0].body.events[0].content[0].text).status, 'ok');
+  assert.ok(!JSON.stringify([...h.ctx.data]).includes('規則正文'), 'Do not accumulate source bodies in Durable Object storage');
+  h.events.push({ id: 'final', type: 'agent.message', content: [{ type: 'text', text: '已確認規則，這是具體答案。' }], processed_at: '2026-10-15T05:01:03Z' },
+    { id: 'done', type: 'session.status_idle', stop_reason: { type: 'end_turn' }, processed_at: '2026-10-15T05:01:04Z' });
+  await h.conversation.alarm();
+  assert.deepEqual(h.replies, ['已確認規則，這是具體答案。']);
+  assert.equal(h.calls.filter(c => c.body?.budget).length, 1);
+  assert.equal(budgetStatus(h.budget.state, env).reservedCents, 0);
+});
+
+test('existing conversations receive new tools without replacing their session or history', async t => {
+  const h = await harness(t); await h.enqueue(input('old')); await h.conversation.alarm();
+  delete h.conversation.state.researchToolsVersion;
+  delete h.conversation.state.researchPolicyVersion;
+  await h.enqueue(input('next')); await h.conversation.alarm();
+  assert.equal(h.calls.filter(c => c.path === '/v1/sessions' && c.method === 'POST').length, 1);
+  const update = h.calls.find(c => c.body?.agent?.tools);
+  assert.ok(update.body.agent.tools.some(t => t.name === 'read_svwb_source'));
+  assert.ok(update.body.agent.tools.some(t => t.name === 'roll_dice'));
+  assert.equal(h.conversation.state.researchToolsVersion, 3);
+  assert.ok(h.calls.some(c => c.body?.events?.at(-1)?.type === 'system.message'));
+});
+
+test('research exhaustion completes from plain evidence within the remaining allowance and preserves the main conversation', async t => {
+  const h = await harness(t, ['已確認的繁中結論與來源。']); h.localEnv.ANSWER_RESERVE_CENTS = '4';
+  h.setAutoAnswer(false); await h.enqueue(input('research')); await h.conversation.alarm();
+  assert.equal(h.calls.find(c => c.path === '/v1/sessions').body.budget.max_list_cost.amount, '20');
+  h.setUsage(16);
+  h.events.push({ id: 'research-cap', type: 'session.status_idle', stop_reason: { type: 'budget_reached' }, processed_at: '2026-10-15T05:00:03.000Z' });
+  await h.conversation.alarm();
+  assert.equal(h.conversation.state.current.phase, 'finalize-stop');
+  assert.equal(h.conversation.state.blocked, undefined);
+  h.setAutoAnswer(true); await h.conversation.alarm();
+  for (let i = 0; i < 8 && h.conversation.state.current; i++) await h.conversation.alarm();
+  assert.equal(h.conversation.state.current, null);
+  assert.deepEqual(h.replies, ['已確認的繁中結論與來源。']);
+  const finish = h.calls.find(c => c.body?.agent?.tools?.length === 0);
+  assert.equal(finish.body.budget.max_list_cost.amount, '3');
+  assert.equal(finish.body.agent.type, 'agent_with_overrides');
+  assert.ok(h.calls.some(c => c.body?.events?.[0]?.type === 'user.interrupt'));
+  assert.equal(budgetStatus(h.budget.state, env).accountedCents, 20);
+  assert.equal(budgetStatus(h.budget.state, env).reservedCents, 0);
+  await h.enqueue(input('next')); await h.conversation.alarm();
+  assert.equal(h.conversation.state.sessionId,'sesn_test');
+  assert.ok(h.calls.some(c => c.path.endsWith('/sesn_completion') && c.method === 'DELETE'));
+  assert.ok(h.calls.some(c => c.body?.events?.some(e=>e.content?.some(b=>b.text?.includes('previous_assistant_answer')))));
+});
+
+test('search-only drafts get one bounded source-reading continuation before delivery', async t => {
+  const h = await harness(t, ['已補讀正文，這是答案。']); h.setAutoAnswer(false);
+  await h.enqueue(input('search')); await h.conversation.alarm();
+  h.events.push({ id: 'search1', type: 'agent.tool_use', name: 'web_search', processed_at: '2026-10-15T05:00:03.000Z' },
+    { id: 'draft', type: 'agent.message', content: [{ type: 'text', text: '搜尋摘要說明。' }], processed_at: '2026-10-15T05:00:04.000Z' },
+    { id: 'end1', type: 'session.status_idle', stop_reason: { type: 'end_turn' }, processed_at: '2026-10-15T05:00:05.000Z' });
+  await h.conversation.alarm();
+  assert.equal(h.replies.length, 0); assert.equal(h.conversation.state.current.evidenceRepair, true);
+  h.setAutoAnswer(true); await h.conversation.alarm();
+  // The fake API uses earlier timestamps, so poll directly without a cursor.
+  if (h.conversation.state.current) { h.conversation.state.current.since = null; await h.conversation.alarm(); }
+  assert.deepEqual(h.replies, ['已補讀正文，這是答案。']);
+  assert.equal(h.calls.filter(c => c.body?.budget).length, 1);
+});
+
+test('a costly source result after compaction is stopped before it can consume the final-answer allowance', async t => {
+  const h = await harness(t, ['下版退環境的龍族卡，依已讀卡包資料列出。']);
+  h.localEnv.ANSWER_RESERVE_CENTS = '4';
+  h.setAutoAnswer(false); await h.enqueue(input('rotation')); await h.conversation.alarm();
+  const job = h.conversation.state.current;
+  // Captured production boundary: summary cost left a 16-cent session cap;
+  // another model request at 12 cents jumped to 18 before any answer existed.
+  job.capCents = 16; job.researchCapCents = 12; job.priorCents = 3;
+  h.setUsage(12);
+  h.events.push({ id: 'expensive-page', type: 'agent.custom_tool_use', name: 'read_svwb_source', input: { url: 'https://gamewith.jp/shadowverse-wb/525586' }, processed_at: '2026-10-15T05:00:03.000Z' },
+    { id: 'waiting-page', type: 'session.status_idle', stop_reason: { type: 'requires_action', event_ids: ['expensive-page'] }, processed_at: '2026-10-15T05:00:04.000Z' });
+  await h.conversation.alarm();
+  assert.equal(h.conversation.state.current.phase, 'finalize-stop');
+  assert.equal(h.calls.some(c => c.body?.events?.some(e => e.type === 'user.custom_tool_result')), false);
+  h.setAutoAnswer(true);
+  for (let i = 0; i < 8 && h.conversation.state.current; i++) await h.conversation.alarm();
+  const interrupt = h.calls.findIndex(c => c.body?.events?.[0]?.type === 'user.interrupt');
+  const toolResult = h.calls.findIndex(c => c.body?.events?.some(e => e.type === 'user.custom_tool_result'));
+  assert.ok(interrupt >= 0 && toolResult > interrupt);
+  assert.match(h.replies[0], /下版退環境的龍族卡/);
+  assert.equal(h.conversation.state.blocked, undefined);
+  assert.equal(budgetStatus(h.budget.state, env).accountedCents, 19);
+});
+
+test('uncertain completion submission recovers after a durable restart without another generation', async t => {
+  const h=await harness(t,['可核實的完整答案。'],{loseCompletionResponse:true});
+  h.localEnv.ANSWER_RESERVE_CENTS='4'; h.setAutoAnswer(false);
+  await h.enqueue(input('complete-retry')); await h.conversation.alarm(); h.setUsage(14);
+  h.events.push({id:'waiting',type:'session.status_idle',stop_reason:{type:'requires_action'},processed_at:'2026-10-15T05:00:03.000Z'});
+  for(let i=0;i<4;i++) await h.conversation.alarm();
+  assert.equal(h.conversation.state.current.phase,'complete-sending');
+  const restarted=new Conversation(h.ctx,h.localEnv); await h.ctx.ready; await restarted.alarm();
+  assert.equal(restarted.state.current,null); assert.deepEqual(h.replies,['可核實的完整答案。']);
+  assert.equal(h.calls.filter(c=>c.path==='/v1/sessions/sesn_completion/events' && c.method==='POST').length,1);
+  assert.equal(budgetStatus(h.budget.state,env).accountedCents,18);
 });

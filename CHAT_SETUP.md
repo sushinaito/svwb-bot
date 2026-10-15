@@ -208,6 +208,37 @@ Cloudflare stores the conversation queue and routing metadata. Claude stores eac
 conversation's transcript. A conversation reset deletes its Claude session.
 
 References:
+- General SVWB questions use a shared research workflow rather than a list of
+  question-specific answers. The agent can call `read_svwb_source` for actual
+  official/GameWith/Game8/SVWB Meta/Shadowverse Wins page text, headings, dates, links and subsequent
+  ranges, and `query_svwb_data` for official cards, deck codes or meta data. These
+  are bounded public read operations; other sites remain available through the
+  managed web tools. Source text is untrusted data. The guide reader removes global
+  navigation where possible and retains image alt labels used by card tables.
+  Existing idle sessions receive these tools without losing their history.
+  Custom tool results are retried by their idempotent event ID; only small markers
+  are stored in the conversation. At most eight direct data/page reads run per turn.
+  Search-only drafts receive one source-reading continuation when budget permits.
+- `ANSWER_RESERVE_CENTS=4` reserves part of the existing 20-cent turn allowance
+  for the final answer. A soft threshold interrupts research before admitting
+  another costly model request. A temporary session uses the same pinned model,
+  no tools, and bounded plain evidence to complete the answer, without inherited
+  web citation instructions that can produce untranslated quotations. Its cap
+  comes from the remaining turn allowance; both sessions' reported costs and
+  rounding margins are charged to the same reservation. Provider enforcement is
+  between requests, so a final request can still overshoot the cap. Temporary
+  sessions are deleted after delivery; the original conversation is retained and
+  receives the completed answer as context on its next turn. Japanese names are distinguished
+  from sustained untranslated prose, so a mostly Chinese answer is not suppressed
+  just because it contains several card or expansion names.
+  `node --env-file=.env.txt scripts/smoke-research.js [0,1,2,3]` runs bounded live
+  tests through the actual conversation state machine, captures Discord sends
+  locally, and deletes test sessions. Tests incur provider charges outside the
+  deployed daily ledger. Cases cover rules with old-session migration, game
+  systems, rotation, current news, a tempo-elf deck request (case 4), the captured
+  Dragon rotation failure (case 5), and a complete rotation list (case 6). The last
+  case compares every returned name against the complete official pack catalog.
+  Results are saved only under `.wrangler/`.
 - Strategy questions (mulligans, opening hands, matchups and play patterns) prefer
   GameWith's SVWB guides, with Game8 as an additional research source. Named
   archetypes load their own current sample deck and Japanese/Traditional Chinese
@@ -232,10 +263,20 @@ References:
   minutes) to identify up to three candidates, then fetch each official card's
   details from the same API used by its card page. Answers can include Japanese
   voice actor, illustrator, cost and effects with the direct official card link.
+  The generic source reader routes official card URLs through this same exact-ID
+  lookup, avoiding dynamic HTML shells and managed-fetch URL substitutions.
+  Standalone English shorthand can omit a title or separate a compound word.
   Ambiguous names remain separate candidates; unavailable details are not guessed.
   Pronoun follow-ups can use a quoted message or card IDs from this conversation
   within 30 minutes. `reset` clears those IDs too. `/admin/source-health` verifies
   this official lookup without sending a Discord message or using AI tokens.
+- The generic `catalog` resource queries the official card-list API by class,
+  pack, rarity, cost or format. `view=packs` returns the pack directory;
+  `limit=120` batches up to four pages with duplicate/count/filter validation.
+  Compact names and class labels keep long lists affordable; effects are optional.
+  Responses expose `total` and `nextOffset`; partial data must not be called a
+  complete list. Future eligibility must be inferred from sourced rules and
+  announcements, not from today's legality flag alone.
 - https://platform.claude.com/docs/en/managed-agents/events-and-streaming
 - https://platform.claude.com/docs/en/managed-agents/budgets
 - https://docs.discord.com/developers/events/gateway

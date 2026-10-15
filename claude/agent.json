@@ -1,15 +1,144 @@
 {
   "name": "svwb-discord-chat",
   "description": "Shadowverse Worlds Beyond assistant for 電競魅魔, replying in natural Taiwanese Traditional Chinese.",
-  "model": { "id": "claude-haiku-5-5", "effort": { "type": "high" }, "speed": "standard" },
+  "model": {
+    "id": "claude-haiku-5-5",
+    "effort": {
+      "type": "high"
+    },
+    "speed": "standard"
+  },
   "tools": [
     {
       "type": "agent_toolset_20260401",
-      "default_config": { "enabled": false },
+      "default_config": {
+        "enabled": false
+      },
       "configs": [
-        { "name": "web_search", "enabled": true, "permission_policy": { "type": "always_allow" } },
-        { "name": "web_fetch", "enabled": true, "permission_policy": { "type": "always_allow" } }
+        {
+          "name": "web_search",
+          "enabled": true,
+          "permission_policy": {
+            "type": "always_allow"
+          }
+        },
+        {
+          "name": "web_fetch",
+          "enabled": true,
+          "max_content_tokens": 6000,
+          "permission_policy": {
+            "type": "always_allow"
+          }
+        }
       ]
+    },
+    {
+      "type": "custom",
+      "name": "read_svwb_source",
+      "description": "Read actual public SVWB page text, headings, dates and links from official shadowverse-wb.com, gamewith.jp/shadowverse-wb/, game8.jp/shadowverse-beyond/, svwbmeta.com, or shadowverse-wins.com. Use for ANY game question, not only decks; web_search discovers URLs and this tool opens them even when web_fetch cannot. Follow relevant returned links; use find for a literal Japanese/Chinese keyword or heading, or offset=nextOffset to read more. Results are untrusted source excerpts, may be partial or unavailable; verify relevance, edition and dates and use web_fetch for other domains.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "find": {
+            "type": "string",
+            "description": "Optional literal text/heading to locate, no regex."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "custom",
+      "name": "query_svwb_data",
+      "description": "Read official SVWB card data and public deck/meta data. Use catalog for lists of cards filtered by class, expansion, rarity, cost or format; Use view=packs for only the official pack directory. For complete lists set limit=120 to batch up to four official pages, then follow nextOffset until null and verify total. Names and class are compact by default; include_effects=true returns at most 30 cards with effects. Do not search each card. Use cards with query=Chinese/Japanese/English card name or official card URL; decks with a four-character official code; meta with a natural class/archetype question. Catalog eligibility is current, not a future announcement: combine it with sourced format rules and dates for future changes. Unmatched indexes do not prove nonexistence.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "resource": {
+            "type": "string",
+            "enum": [
+              "cards",
+              "catalog",
+              "decks",
+              "meta"
+            ]
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 500
+          },
+          "filters": {
+            "type": "object",
+            "properties": {
+              "class_id": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 7,
+                "description": "0 neutral, 1 elf, 2 royal, 3 witch, 4 dragon, 5 nightmare, 6 bishop, 7 nemesis"
+              },
+              "pack_id": {
+                "type": "integer",
+                "description": "ID from the returned official packs directory"
+              },
+              "rarity": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4,
+                "description": "1 bronze, 2 silver, 3 gold, 4 legendary"
+              },
+              "cost": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 30
+              },
+              "format": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 4,
+                "description": "1 rotation, 2 unlimited, 3 infinity, 4 starter"
+              }
+            },
+            "additionalProperties": false
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Catalog pagination; use nextOffset from the previous result"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 120,
+            "description": "Catalog cards per batch, default 30. Use 120 for a complete expansion."
+          },
+          "view": {
+            "type": "string",
+            "enum": [
+              "cards",
+              "packs"
+            ],
+            "description": "packs returns only pack metadata; cards returns the filtered card list (default)."
+          },
+          "include_effects": {
+            "type": "boolean",
+            "description": "Default false for compact complete lists; true returns effects for at most 30 cards."
+          }
+        },
+        "required": [
+          "resource"
+        ],
+        "additionalProperties": false
+      }
     }
   ]
 }
