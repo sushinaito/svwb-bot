@@ -365,8 +365,9 @@ References:
   syncs from replacing the last usable library. A single source outage retains
   that source's old builds while validated additions from available sources are
   saved with `syncStatus=partial` and explicit `sourceErrors`. It is never silently
-  reported as a complete refresh. Initial cloud testing found GameWith HTTP 403;
-  no access-control workaround is used. Other public sources continue updating.
+  reported as a complete refresh. An initial cloud attempt encountered GameWith
+  HTTP 403; a later normal run succeeded for every source and saved 364 builds.
+  No access-control workaround is used; transient failures remain visible.
   Daily scheduling is native Claude Managed Agents, at 09:00 Asia/Tokyo. No local
   Codex automation is required; the earlier local heartbeat was removed. The
   dedicated Haiku 5.5 maintenance agent runs the bundled deterministic updater

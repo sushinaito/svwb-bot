@@ -4,7 +4,7 @@ import {DeckLibrary,searchDeckLibrary} from '../src/chat/deck-library.js';
 import {deckRevision} from '../src/chat/deck-library-data.js';
 import {cardSignature} from '../src/chat/decks.js';
 import worker from '../src/chat/worker.js';
-import {budgetStatus} from '../src/chat/budget.js';
+import {budgetStatus,reserveTurn,jstDay} from '../src/chat/budget.js';
 
 const cards=[...Array.from({length:13},(_,i)=>({id:String(1000+i),quantity:3})),{id:'999',quantity:1}];
 const deck={id:'first',classId:1,format:'rotation',deckUrl:'https://shadowverse-wb.com/cht/deck/detail/?hash=1.1'+'.abcd'.repeat(40),
@@ -67,4 +67,6 @@ test('a partial source outage preserves existing builds and exposes errors while
 test('native scheduled maintenance remains inside the existing daily allowance',()=>{
  const status=budgetStatus({turns:{},days:{}},{DAILY_BUDGET_CENTS:'200',BUDGET_MARGIN_CENTS:'10',MAINTENANCE_BUDGET_CENTS:'5'});
  assert.equal(status.maintenanceCents,5);assert.equal(status.reservedCents,5);assert.equal(status.remainingCents,185);
+ const refusal=reserveTurn({turns:{},days:{[jstDay()]:165}},{DAILY_BUDGET_CENTS:'200',BUDGET_MARGIN_CENTS:'10',MAINTENANCE_BUDGET_CENTS:'5'},'message');
+ assert.equal(refusal.reason,'daily_budget'); // maintenance is not another chat that will release a reservation
 });

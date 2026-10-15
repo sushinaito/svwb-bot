@@ -24,7 +24,7 @@ export function reserveTurn(state, env, id, now = Date.now()) {
   const allowance = Number(env.TURN_BUDGET_CENTS || 20);
   // Two cents cover rounding of cumulative cost at both ends of the turn.
   if (status.remainingCents < allowance + 2) return { approved: false,
-    reason: status.capCents - status.marginCents - status.accountedCents >= allowance + 2 ? 'budget_reserved' : 'daily_budget', ...status };
+    reason: status.capCents - status.marginCents - status.accountedCents - (status.maintenanceCents || 0) >= allowance + 2 ? 'budget_reserved' : 'daily_budget', ...status };
   const turn = { day: status.day, allowance, reserved: allowance + 2, status: 'open' };
   state.turns[id] = turn;
   return { approved: true, ...turn };
