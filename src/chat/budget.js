@@ -37,6 +37,22 @@ export function settleTurn(state, id, cents, now = Date.now()) {
   turn.charged = Math.ceil(cents);
 }
 
+export function resetDailyBudget(state, env, input, now = Date.now()) {
+  const day = jstDay(now);
+  if (input.day !== day || !/^[a-zA-Z0-9-]{16,80}$/.test(input.requestId || '')) {
+    return { error: 'Current JST day and a valid requestId are required' };
+  }
+  state.resets ||= {};
+  const previous = state.resets[input.requestId];
+  if (previous) return { ok: true, duplicate: true, reset: previous, budget: budgetStatus(state, env, now) };
+  const reset = { day, at: new Date(now).toISOString(), previousAccountedCents: state.days[day] || 0 };
+  state.days[day] = 0;
+  state.resets[input.requestId] = reset;
+  // Keep turn deduplication and open reservations: a pending reply must still
+  // settle against the renewed allowance. This does not erase upstream billing.
+  return { ok: true, reset, budget: budgetStatus(state, env, now) };
+}
+
 export class DailyBudget {
   constructor(ctx, env) {
     this.ctx = ctx;
@@ -53,10 +69,15 @@ export class DailyBudget {
     let result = { ok: true };
     if (path === '/reserve') result = reserveTurn(this.state, this.env, input.id);
     else if (path === '/settle') settleTurn(this.state, input.id, input.cents);
+    else if (path === '/reset') {
+      result = resetDailyBudget(this.state, this.env, input);
+      if (result.error) return json(result, 400);
+    }
     else return new Response('Not found', { status: 404 });
     const oldest = jstDay(Date.now() - 7 * 86400000);
     for (const [id, turn] of Object.entries(this.state.turns)) if (turn.status === 'settled' && turn.day < oldest) delete this.state.turns[id];
     for (const day of Object.keys(this.state.days)) if (day < oldest) delete this.state.days[day];
+    for (const [id, reset] of Object.entries(this.state.resets || {})) if (reset.day < oldest) delete this.state.resets[id];
     await this.ctx.storage.put('ledger', this.state);
     return json(result);
   }

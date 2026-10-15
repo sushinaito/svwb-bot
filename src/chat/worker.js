@@ -11,11 +11,18 @@ export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
     if (request.method === 'GET' && path === '/') return new Response('SVWB conversational bot');
-    if (!['/admin/status', '/admin/start', '/admin/stop', '/admin/source-health'].includes(path)) return new Response('Not found', { status: 404 });
+    if (!['/admin/status', '/admin/start', '/admin/stop', '/admin/source-health', '/admin/budget-reset'].includes(path)) return new Response('Not found', { status: 404 });
     if (!env.CHAT_ADMIN_TOKEN || request.headers.get('Authorization') !== `Bearer ${env.CHAT_ADMIN_TOKEN}`) {
       return new Response('Unauthorized', { status: 401 });
     }
     if (request.method !== (path.endsWith('/status') || path.endsWith('/source-health') ? 'GET' : 'POST')) return json({ error: 'Method not allowed' }, 405);
+    if (path.endsWith('/budget-reset')) {
+      let input;
+      try { input = await request.json(); } catch { return json({ error: 'JSON body required' }, 400); }
+      return env.BUDGET.getByName('daily').fetch('https://budget/reset', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+      });
+    }
     if (path.endsWith('/source-health')) {
       let diagnostic;
       const result = await metaContext('最近最強的龍族牌組有啥', fetch, d => { diagnostic = d; });

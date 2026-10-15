@@ -208,6 +208,12 @@ Cloudflare stores the conversation queue and routing metadata. Claude stores eac
 conversation's transcript. A conversation reset deletes its Claude session.
 
 References:
+- An explicit owner-requested quota reset can be performed with
+  `node scripts/chat-admin.js budget-reset [unique-request-id]`. This authenticated
+  POST resets today's accounted allowance only, preserving open reservations,
+  turn deduplication, conversation memory and the configured cap. Reusing the same
+  request ID on the same JST day is idempotent. Reset history records the forgiven
+  amount; the reset does not undo charges already incurred at the AI provider.
 - Card-name questions use the public SVWB Meta multilingual index (cached for five
   minutes) to identify up to three candidates, then fetch each official card's
   details from the same API used by its card page. Answers can include Japanese

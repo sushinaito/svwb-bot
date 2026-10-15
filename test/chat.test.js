@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { routeMessage, admitMessage } from '../src/chat/routing.js';
-import { jstDay, budgetStatus, reserveTurn, settleTurn, DailyBudget } from '../src/chat/budget.js';
+import { jstDay, budgetStatus, reserveTurn, settleTurn, resetDailyBudget, DailyBudget } from '../src/chat/budget.js';
 import { splitMessage, sendText, api, messageText } from '../src/chat/api.js';
 import { Conversation, readCost } from '../src/chat/conversation.js';
 import { DiscordGateway } from '../src/chat/gateway.js';
@@ -69,6 +69,43 @@ test('temporary reservations can deny a turn then release capacity, distinct fro
   settleTurn(state, 'second', 20);
   assert.equal(reserveTurn(state, env, 'third').reason, 'daily_budget');
   assert.equal(budgetStatus(state, env).capCents, 200);
+});
+
+test('manual quota reset preserves pending charges and deduplication, and a retry cannot erase new spending', () => {
+  const now = Date.parse('2026-10-15T08:00:00Z');
+  const state = { days: { '2026-10-15': 160, '2026-10-14': 80 }, turns: {} };
+  reserveTurn(state, env, 'pending', now);
+  const input = { day: '2026-10-15', requestId: 'manual-reset-test-001' };
+  const result = resetDailyBudget(state, env, input, now);
+  assert.equal(result.reset.previousAccountedCents, 160);
+  assert.equal(result.budget.accountedCents, 0);
+  assert.equal(result.budget.reservedCents, 22);
+  assert.equal(state.days['2026-10-14'], 80);
+  settleTurn(state, 'pending', 5, now);
+  assert.equal(reserveTurn(state, env, 'pending', now).approved, false);
+  const retry = resetDailyBudget(state, env, input, now);
+  assert.equal(retry.duplicate, true);
+  assert.equal(retry.budget.accountedCents, 5);
+  assert.equal(retry.budget.capCents, 200);
+  const before = JSON.stringify(state);
+  assert.ok(resetDailyBudget(state, env, { ...input, day: '2026-10-14' }, now).error);
+  assert.ok(resetDailyBudget(state, env, { ...input, requestId: '' }, now).error);
+  assert.equal(JSON.stringify(state), before);
+});
+
+test('quota reset requires admin authentication and POST and persists through the budget object', async () => {
+  const ctx = new FakeContext(), budget = new DailyBudget(ctx, env); await ctx.ready;
+  budget.state.days[jstDay()] = 169;
+  const localEnv = { ...env, CHAT_ADMIN_TOKEN: 'test-admin',
+    BUDGET: { getByName: () => ({ fetch: (url, init) => budget.fetch(new Request(url, init)) }) } };
+  const url = 'https://worker/admin/budget-reset';
+  assert.equal((await worker.fetch(new Request(url, { method: 'POST' }), localEnv)).status, 401);
+  assert.equal((await worker.fetch(new Request(url, { headers: { Authorization: 'Bearer test-admin' } }), localEnv)).status, 405);
+  const response = await worker.fetch(new Request(url, { method: 'POST', headers: { Authorization: 'Bearer test-admin' },
+    body: JSON.stringify({ day: jstDay(), requestId: 'manual-reset-http-001' }) }), localEnv);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).budget.remainingCents, 190);
+  assert.equal((await ctx.storage.get('ledger')).days[jstDay()], 0);
 });
 
 test('Discord output is bounded, Unicode-safe and suppresses all mentions', async t => {
