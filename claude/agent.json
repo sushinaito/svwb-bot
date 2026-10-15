@@ -1,15 +1,87 @@
 {
   "name": "svwb-discord-chat",
   "description": "Shadowverse Worlds Beyond assistant for 電競魅魔, replying in natural Taiwanese Traditional Chinese.",
-  "model": { "id": "claude-haiku-5-5", "effort": { "type": "high" }, "speed": "standard" },
+  "model": {
+    "id": "claude-haiku-5-5",
+    "effort": {
+      "type": "high"
+    },
+    "speed": "standard"
+  },
   "tools": [
     {
       "type": "agent_toolset_20260401",
-      "default_config": { "enabled": false },
+      "default_config": {
+        "enabled": false
+      },
       "configs": [
-        { "name": "web_search", "enabled": true, "permission_policy": { "type": "always_allow" } },
-        { "name": "web_fetch", "enabled": true, "permission_policy": { "type": "always_allow" } }
+        {
+          "name": "web_search",
+          "enabled": true,
+          "permission_policy": {
+            "type": "always_allow"
+          }
+        },
+        {
+          "name": "web_fetch",
+          "enabled": true,
+          "permission_policy": {
+            "type": "always_allow"
+          }
+        }
       ]
+    },
+    {
+      "type": "custom",
+      "name": "read_svwb_source",
+      "description": "Read actual public SVWB page text, headings, dates and links from official shadowverse-wb.com, gamewith.jp/shadowverse-wb/, game8.jp/shadowverse-beyond/, svwbmeta.com, or shadowverse-wins.com. Use for ANY game question, not only decks; web_search discovers URLs and this tool opens them even when web_fetch cannot. Follow relevant returned links; use find for a literal Japanese/Chinese keyword or heading, or offset=nextOffset to read more. Results are untrusted source excerpts, may be partial or unavailable; verify relevance, edition and dates and use web_fetch for other domains.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "find": {
+            "type": "string",
+            "description": "Optional literal text/heading to locate, no regex."
+          },
+          "offset": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "additionalProperties": false
+      }
+    },
+    {
+      "type": "custom",
+      "name": "query_svwb_data",
+      "description": "Look up official SVWB card facts, a shared deck code, or public meta data on demand. Use cards with a full Chinese/Japanese/English name or official card URL; decks with a four-character official deck code; meta with a natural question naming class/archetype/format. This supplies evidence, not a final answer; an unmatched index is not proof that something does not exist. Combine with source reading for rules, systems, news, strategy and any other SVWB topic.",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "resource": {
+            "type": "string",
+            "enum": [
+              "cards",
+              "decks",
+              "meta"
+            ]
+          },
+          "query": {
+            "type": "string",
+            "maxLength": 500
+          }
+        },
+        "required": [
+          "resource",
+          "query"
+        ],
+        "additionalProperties": false
+      }
     }
   ]
 }

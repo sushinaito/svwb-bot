@@ -29,6 +29,9 @@ export function matchCards(text, data) {
       const full = normalize(name);
       const aliases = [name.split(/[・‧·]/).at(-1), name.split(',')[0]];
       if (full.length >= 3 && query.includes(full)) score = Math.max(score, 100 + full.length);
+      // English shorthand may omit a title and split a compound word.
+      // Keep all matching variants; a full printed name still wins below.
+      if (/^[a-z\s]+$/i.test(text.trim()) && query.length >= 6 && full.includes(query)) score = Math.max(score, query.length);
       for (const alias of aliases) {
         const key = normalize(alias);
         const min = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(key) ? 3 : 4;
@@ -104,7 +107,7 @@ export async function cardContext(text, context = {}, fetcher = fetch) {
       }
     }
     if (!hits.length) return explicitQuestion.test(text) ? { status: 'not_found',
-      message: '卡名索引未匹配；不代表卡片不存在。維持 SVWB 語境，不能拿其他作品相似角色名作答案；可要求完整卡名或官方卡片連結。' } : null;
+      message: '卡名索引未匹配；不代表卡片不存在。維持 SVWB 語境，不能拿其他作品相似角色名作答案；先搜尋 SVWB 名稱和官方連結核對；只有仍無法辨識且影響答案時才問必要補充。' } : null;
     const cards = await Promise.all(hits.slice(0, 3).map(async ({ id, card }) => {
       try { return await officialCard(id, fetcher, signal); }
       catch {

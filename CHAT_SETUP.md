@@ -208,6 +208,31 @@ Cloudflare stores the conversation queue and routing metadata. Claude stores eac
 conversation's transcript. A conversation reset deletes its Claude session.
 
 References:
+- General SVWB questions use a shared research workflow rather than a list of
+  question-specific answers. The agent can call `read_svwb_source` for actual
+  official/GameWith/Game8/SVWB Meta/Shadowverse Wins page text, headings, dates, links and subsequent
+  ranges, and `query_svwb_data` for official cards, deck codes or meta data. These
+  are bounded public read operations; other sites remain available through the
+  managed web tools. Source text is untrusted data. The guide reader removes global
+  navigation where possible and retains image alt labels used by card tables.
+  Existing idle sessions receive these tools without losing their history.
+  Custom tool results are retried by their idempotent event ID; only small markers
+  are stored in the conversation. At most eight direct data/page reads run per turn.
+  Search-only drafts receive one source-reading continuation when budget permits.
+- `ANSWER_RESERVE_CENTS=4` sets aside part of the existing 20-cent turn allowance
+  for the final answer. At the research ceiling, the bot disables further
+  investigation tools and uses the remaining allowance to answer from
+  collected evidence. It never increases the turn's reserved total or daily cap;
+  the provider's between-request enforcement can still overshoot a stage boundary.
+  The next turn restores research tools. Japanese proper names are distinguished
+  from sustained untranslated prose, so a mostly Chinese answer is not suppressed
+  just because it contains several card or expansion names.
+  `node --env-file=.env.txt scripts/smoke-research.js [0,1,2,3]` runs bounded live
+  tests through the actual conversation state machine, captures Discord sends
+  locally, and deletes test sessions. Tests incur provider charges outside the
+  deployed daily ledger. Cases cover rules with old-session migration, game
+  systems, rotation, current news and a tempo-elf deck request (case 4).
+  Results are saved only under `.wrangler/`.
 - Strategy questions (mulligans, opening hands, matchups and play patterns) prefer
   GameWith's SVWB guides, with Game8 as an additional research source. Named
   archetypes load their own current sample deck and Japanese/Traditional Chinese
@@ -232,6 +257,9 @@ References:
   minutes) to identify up to three candidates, then fetch each official card's
   details from the same API used by its card page. Answers can include Japanese
   voice actor, illustrator, cost and effects with the direct official card link.
+  The generic source reader routes official card URLs through this same exact-ID
+  lookup, avoiding dynamic HTML shells and managed-fetch URL substitutions.
+  Standalone English shorthand can omit a title or separate a compound word.
   Ambiguous names remain separate candidates; unavailable details are not guessed.
   Pronoun follow-ups can use a quoted message or card IDs from this conversation
   within 30 minutes. `reset` clears those IDs too. `/admin/source-health` verifies

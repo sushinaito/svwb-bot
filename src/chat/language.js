@@ -1,8 +1,16 @@
 export function needsChineseRewrite(answer, request) {
   if (/(?:請|用|以|改成|回答|reply|respond|answer).{0,30}(?:英文|英語|日文|日語|English|Japanese)|(?:English|Japanese)\s*(?:please|only)/i.test(request)) return false;
-  const prose = answer.replace(/https?:\/\/[^\s)]+/g, '');
+  const prose = answer.replace(/https?:\/\/[^\s)]+/g, '')
+    // Short quoted names and link labels can legitimately remain Japanese.
+    .replace(/[「《〈]([^」》〉\n]{1,60})[」》〉]/g, (all, name) =>
+      (name.match(/[\u3041-\u3096]/g) || []).length <= 3 ? '' : all);
   return /\b[A-Za-z]+(?:[ ,;:\-]+[A-Za-z]+){8,}/.test(prose) ||
-    (prose.match(/[\u3041-\u3096\u30a1-\u30fa]/g) || []).length >= 15;
+    // Katakana card/set names are not untranslated prose. Look for sustained
+    // Japanese grammar within a sentence instead of counting names globally.
+    prose.split(/[。！？\n]/).some(sentence => {
+      const hiragana = (sentence.match(/[\u3041-\u3096]/g) || []).length;
+      return hiragana >= 8 && hiragana / Math.max(1, (sentence.match(/\p{L}/gu) || []).length) >= 0.15;
+    });
 }
 
 export const rewriteEvent = () => ({ type: 'user.message', content: [{ type: 'text', text:

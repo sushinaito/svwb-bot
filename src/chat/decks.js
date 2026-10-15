@@ -74,6 +74,6 @@ export async function lookupDeck(code, fetcher = fetch) {
   }
 }
 
-export async function deckContext(text) {
-  return Promise.all(deckCodes(text).map(code => lookupDeck(code)));
+export async function deckContext(text, fetcher = fetch) {
+  return Promise.all(deckCodes(text).map(code => lookupDeck(code, fetcher)));
 }

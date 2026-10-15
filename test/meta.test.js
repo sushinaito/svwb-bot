@@ -147,7 +147,7 @@ test('named mulligan questions load the requested archetype with bilingual cards
   assert.equal(result.archetypes[0].decks[0].cards[0].quantity, 3);
   const guidance = strategyResearch('海賊皇怎麼留牌', result);
   assert.match(guidance.searchQueries[0], /^site:gamewith.jp\/shadowverse-wb\/ 海賊ロイヤル ローテーション マリガン$/);
-  assert.match(userEvent({ text: '海賊皇怎麼留牌', meta: result }).content[0].text, /自行用 web_fetch 開啟正文/);
+  assert.match(userEvent({ text: '海賊皇怎麼留牌', meta: result }).content[0].text, /read_svwb_source 讀正文/);
   const followup = await metaContext('搜一下gamewith之類的攻略網', f.fetcher, undefined, '目前我讀不到海賊皇的完整牌表');
   assert.equal(followup.strategyTargets[0].name, '海賊皇');
   assert.equal(followup.archetypes[0].decks[0].cards[0].name, '海域斥候');

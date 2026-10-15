@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { cardContext, matchCards } from '../src/chat/cards.js';
 import { userEvent } from '../src/chat/conversation.js';
+import { executeResearchTool } from '../src/chat/research.js';
 
 const index = {
   '10924110': { names: { 'zh-Hant': '逆行的罪人‧芭芭蘿絲', ja: '逆行の咎人・バルバロス', en: 'Barbaros, Rebellious Convict' } },
   '10914110': { names: { 'zh-Hant': '新綠的守護者‧艾莉亞' } },
+  '10021110': { names: { 'zh-Hant': '瞬息的迅捷劍士', en: 'Flashstep Quickblader' } },
 };
 function fixture(data = index, failure = null) {
   const calls = [];
@@ -37,6 +39,8 @@ test('multilingual full names and character aliases resolve without unrelated fr
     assert.equal(matchCards(text, index)[0]?.id, '10924110');
   }
   assert.equal(matchCards('七龍珠的芭朵絲', index).length, 0);
+  assert.equal(matchCards('quick blader', index)[0]?.id, '10021110');
+  assert.equal(matchCards('quick', index).length, 0);
 });
 
 test('official CV and direct source are supplied, and the catalog is cached', async () => {
@@ -51,6 +55,15 @@ test('official CV and direct source are supplied, and the catalog is cached', as
   await cardContext('Barbaros CV', {}, fetcher);
   assert.equal(calls.filter(u => u.hostname === 'svwbmeta.com').length, 2);
   assert.match(userEvent({ text: '誰配的', cards: result }).content[0].text, /card_lookup.*悠木碧/s);
+});
+
+test('general source reader uses the exact official card ID instead of a dynamic HTML shell', async () => {
+  const { fetcher, calls } = fixture();
+  const result = await executeResearchTool('read_svwb_source', { url: 'https://shadowverse-wb.com/cht/deck/cardslist/card/?card_id=10021110' }, fetcher);
+  assert.equal(result.cards[0].id, '10021110');
+  assert.equal(result.cards[0].name, '瞬息的迅捷劍士');
+  assert.equal(result.cards[0].verification, 'official');
+  assert.equal(calls.length, 1);
 });
 
 test('follow-ups use quoted or recent cards, while an explicit new name takes priority', async () => {

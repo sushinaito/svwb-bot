@@ -147,11 +147,12 @@ async function harness(t, answers = [], options = {}) {
   const conversation = new Conversation(ctx, localEnv);
   await ctx.ready;
   const calls = [], replies = [], events = [];
-  let sequence = 0, usage = 0, autoAnswer = true, sessionCount = 0;
+  let sequence = 0, usage = 0, autoAnswer = true, sessionCount = 0, sessionBudget, sessionTools = [], resumeRunning = false;
   const stamp = () => `2026-10-15T05:00:${String(++sequence).padStart(2, '0')}.000Z`;
   t.mock.method(globalThis, 'fetch', async (raw, init = {}) => {
     const url = new URL(raw), body = init.body ? JSON.parse(init.body) : undefined;
     calls.push({ path: url.pathname, method: init.method, body });
+    if (url.hostname === 'gamewith.jp') return new Response('<main><h1>規則說明</h1><p>' + '規則正文。'.repeat(40) + '</p></main>', { headers: { 'Content-Type': 'text/html' } });
     if (url.hostname === 'cdn.discordapp.com') return new Response(Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC','base64'), { headers: { 'Content-Type': 'image/png' } });
     if (url.hostname === 'discord.com') {
       if (url.pathname.endsWith('/messages')) replies.push(body.content);
@@ -159,20 +160,32 @@ async function harness(t, answers = [], options = {}) {
     }
     if (url.pathname === '/v1/sessions' && init.method === 'POST') {
       sessionCount++;
+      sessionBudget = body.budget;
       if (sessionCount > 1) usage = 0;
       events.push({ id: 'initial-idle', type: 'session.status_idle', stop_reason: { type: 'end_turn' }, processed_at: stamp() });
       return Response.json({ id: sessionCount === 1 ? 'sesn_test' : `sesn_test_${sessionCount}` });
     }
     if (url.pathname.endsWith('/events') && init.method === 'POST') {
       if (options.rejectImages && body.events[0].content?.some(b => b.type === 'image')) return new Response(null, { status: 400 });
-      const event = { ...body.events[0], id: `user_${sequence}`, processed_at: stamp() };
-      events.push(event);
+      const accepted = [];
+      for (const submitted of body.events) {
+      const event = { ...submitted, id: `user_${sequence}`, processed_at: stamp() };
+      events.push(event); accepted.push(event);
+      if (event.type === 'user.interrupt') {
+        resumeRunning = false;
+        events.push({ id: `idle_${sequence}`, type: 'session.status_idle', processed_at: stamp(), stop_reason: { type: 'interrupted' } });
+      }
+      if (event.type === 'user.custom_tool_result' && options.loseToolResponse) {
+        options.loseToolResponse = false;
+        throw Error('Connection lost after acceptance');
+      }
       if (autoAnswer && event.type === 'user.message') {
         events.push({ id: `reply_${sequence}`, type: 'agent.message', processed_at: stamp(), content: [{ type: 'text', text: answers.shift() || `Answer ${sequence}` }] });
         events.push({ id: `idle_${sequence}`, type: 'session.status_idle', processed_at: stamp(), stop_reason: { type: 'end_turn' } });
         usage += 2;
       }
-      return Response.json({ data: [event] });
+      }
+      return Response.json({ data: accepted });
     }
     if (url.pathname.endsWith('/events')) {
       const since = url.searchParams.get('created_at[gte]');
@@ -180,10 +193,18 @@ async function harness(t, answers = [], options = {}) {
     }
     if (init.method === 'DELETE') return new Response(null, { status: 204 });
     assert.ok(['GET', 'POST'].includes(init.method), 'Session updates must use POST');
-    return Response.json({ id: 'sesn_test', status: 'idle', usage: { list_cost: { currency: 'USD', amount: String(usage) } } });
+    if (body?.budget) sessionBudget = body.budget;
+    if (body?.agent?.tools) sessionTools = body.agent.tools;
+    if (options.resumeAtCap && body?.agent?.tools?.length === 0) {
+      resumeRunning = true;
+      events.push({ id: `reply_${sequence}`, type: 'agent.message', processed_at: stamp(), content: [{ type: 'text', text: '舊研究草稿' }] });
+      events.push({ id: `idle_${sequence}`, type: 'session.status_idle', processed_at: stamp(), stop_reason: { type: 'end_turn' } });
+      usage += 2;
+    }
+    return Response.json({ id: 'sesn_test', status: resumeRunning ? 'running' : 'idle', budget: sessionBudget, agent: { tools: sessionTools }, usage: { list_cost: { currency: 'USD', amount: String(usage) } } });
   });
   const enqueue = data => conversation.fetch(new Request('https://conversation/message', { method: 'POST', body: JSON.stringify(data) }));
-  return { conversation, ctx, localEnv, budget, calls, replies, events, enqueue, setAutoAnswer: value => { autoAnswer = value; } };
+  return { conversation, ctx, localEnv, budget, calls, replies, events, enqueue, setAutoAnswer: value => { autoAnswer = value; }, setUsage: value => { usage = value; } };
 }
 
 test('two conversational turns reuse the pinned agent session and never replay old answers', async t => {
@@ -449,5 +470,80 @@ test('agent spec pins Haiku 5.5 and only enables web tools', async () => {
   assert.equal(spec.model.effort.type, 'high');
   assert.equal(spec.tools[0].default_config.enabled, false);
   assert.deepEqual(spec.tools[0].configs.map(c => c.name), ['web_search', 'web_fetch']);
+  assert.deepEqual(spec.tools.slice(1).map(c => c.name), ['read_svwb_source', 'query_svwb_data']);
   assert.equal(spec.multiagent, undefined);
+});
+
+test('custom research resumes through requires_action and retries ambiguous results without extra budget', async t => {
+  const h = await harness(t, [], { loseToolResponse: true }); h.setAutoAnswer(false);
+  await h.enqueue(input('research')); await h.conversation.alarm();
+  h.events.push({ id: 'progress', type: 'agent.message', processed_at: '2026-10-15T05:01:00Z', content: [{ type: 'text', text: '我先查一下。' }] },
+    { id: 'tool1', type: 'agent.custom_tool_use', name: 'read_svwb_source', input: { url: 'https://gamewith.jp/shadowverse-wb/123' }, processed_at: '2026-10-15T05:01:01Z' },
+    { id: 'wait-tool', type: 'session.status_idle', stop_reason: { type: 'requires_action', event_ids: ['tool1'] }, processed_at: '2026-10-15T05:01:02Z' });
+  await h.conversation.alarm();
+  assert.equal(h.conversation.state.current.toolResults.tool1.sent, false);
+  h.conversation = new Conversation(h.ctx, h.localEnv); await h.ctx.ready;
+  await h.conversation.alarm();
+  assert.equal(h.conversation.state.current.phase, 'poll');
+  assert.equal(h.conversation.state.blocked, undefined);
+  const results = h.calls.filter(c => c.body?.events?.[0]?.type === 'user.custom_tool_result');
+  assert.equal(results.length, 2); assert.ok(results.every(c => c.body.events[0].custom_tool_use_id === 'tool1'));
+  assert.equal(JSON.parse(results[0].body.events[0].content[0].text).status, 'ok');
+  assert.ok(!JSON.stringify([...h.ctx.data]).includes('規則正文'), 'Do not accumulate source bodies in Durable Object storage');
+  h.events.push({ id: 'final', type: 'agent.message', content: [{ type: 'text', text: '已確認規則，這是具體答案。' }], processed_at: '2026-10-15T05:01:03Z' },
+    { id: 'done', type: 'session.status_idle', stop_reason: { type: 'end_turn' }, processed_at: '2026-10-15T05:01:04Z' });
+  await h.conversation.alarm();
+  assert.deepEqual(h.replies, ['已確認規則，這是具體答案。']);
+  assert.equal(h.calls.filter(c => c.body?.budget).length, 1);
+  assert.equal(budgetStatus(h.budget.state, env).reservedCents, 0);
+});
+
+test('existing conversations receive new tools without replacing their session or history', async t => {
+  const h = await harness(t); await h.enqueue(input('old')); await h.conversation.alarm();
+  delete h.conversation.state.researchToolsVersion;
+  delete h.conversation.state.researchPolicyVersion;
+  await h.enqueue(input('next')); await h.conversation.alarm();
+  assert.equal(h.calls.filter(c => c.path === '/v1/sessions' && c.method === 'POST').length, 1);
+  const update = h.calls.find(c => c.body?.agent?.tools);
+  assert.ok(update.body.agent.tools.some(t => t.name === 'read_svwb_source'));
+  assert.equal(h.conversation.state.researchToolsVersion, 1);
+  assert.ok(h.calls.some(c => c.body?.events?.at(-1)?.type === 'system.message'));
+});
+
+test('research budget exhaustion reserves a final answer within the same cap and restores tools on the next turn', async t => {
+  const h = await harness(t, ['已確認的繁中結論與來源。'], { resumeAtCap: true }); h.localEnv.ANSWER_RESERVE_CENTS = '4';
+  h.setAutoAnswer(false); await h.enqueue(input('research')); await h.conversation.alarm();
+  assert.equal(h.calls.find(c => c.path === '/v1/sessions').body.budget.max_list_cost.amount, '16');
+  h.setUsage(16);
+  h.events.push({ id: 'research-cap', type: 'session.status_idle', stop_reason: { type: 'budget_reached' }, processed_at: '2026-10-15T05:00:03.000Z' });
+  await h.conversation.alarm();
+  assert.equal(h.conversation.state.current.phase, 'finalize-budget');
+  assert.equal(h.conversation.state.blocked, undefined);
+  h.setAutoAnswer(true); await h.conversation.alarm();
+  await h.conversation.alarm();
+  await h.conversation.alarm();
+  assert.equal(h.conversation.state.current, null);
+  assert.deepEqual(h.replies, ['已確認的繁中結論與來源。']);
+  const finish = h.calls.find(c => c.body?.agent?.tools?.length === 0);
+  assert.equal(finish.body.budget.max_list_cost.amount, '20');
+  assert.ok(h.calls.some(c => c.body?.events?.[0]?.type === 'user.interrupt'), 'Interrupt and request completion only after the budget update');
+  assert.equal(budgetStatus(h.budget.state, env).accountedCents, 21);
+  assert.equal(budgetStatus(h.budget.state, env).reservedCents, 0);
+  await h.enqueue(input('next')); await h.conversation.alarm();
+  assert.ok(h.calls.some(c => c.body?.agent?.tools?.some(t => t.name === 'read_svwb_source')));
+});
+
+test('search-only drafts get one bounded source-reading continuation before delivery', async t => {
+  const h = await harness(t, ['已補讀正文，這是答案。']); h.setAutoAnswer(false);
+  await h.enqueue(input('search')); await h.conversation.alarm();
+  h.events.push({ id: 'search1', type: 'agent.tool_use', name: 'web_search', processed_at: '2026-10-15T05:00:03.000Z' },
+    { id: 'draft', type: 'agent.message', content: [{ type: 'text', text: '搜尋摘要說明。' }], processed_at: '2026-10-15T05:00:04.000Z' },
+    { id: 'end1', type: 'session.status_idle', stop_reason: { type: 'end_turn' }, processed_at: '2026-10-15T05:00:05.000Z' });
+  await h.conversation.alarm();
+  assert.equal(h.replies.length, 0); assert.equal(h.conversation.state.current.evidenceRepair, true);
+  h.setAutoAnswer(true); await h.conversation.alarm();
+  // The fake API uses earlier timestamps, so poll directly without a cursor.
+  if (h.conversation.state.current) { h.conversation.state.current.since = null; await h.conversation.alarm(); }
+  assert.deepEqual(h.replies, ['已補讀正文，這是答案。']);
+  assert.equal(h.calls.filter(c => c.body?.budget).length, 1);
 });
