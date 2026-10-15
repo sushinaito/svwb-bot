@@ -258,7 +258,8 @@ test('edit handling skips embed-only updates, other guilds and fetched bot messa
 
 test('agent spec pins Haiku 5.5 and only enables web tools', async () => {
   const spec = JSON.parse(await readFile(new URL('../claude/agent.json', import.meta.url), 'utf8'));
-  assert.equal(spec.model, 'claude-haiku-5-5');
+  assert.equal(spec.model.id, 'claude-haiku-5-5');
+  assert.equal(spec.model.effort.type, 'high');
   assert.equal(spec.tools[0].default_config.enabled, false);
   assert.deepEqual(spec.tools[0].configs.map(c => c.name), ['web_search', 'web_fetch']);
   assert.equal(spec.multiagent, undefined);

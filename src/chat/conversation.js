@@ -1,5 +1,6 @@
 import { claude, discord, json, sendText, messageText } from './api.js';
 import { deckContext } from './decks.js';
+import preferredSources from '../../claude/sources.json' with { type: 'json' };
 
 const cap = cents => ({ type: 'limit', max_list_cost: { amount: String(cents), currency: 'USD' } });
 export const userEvent = input => ({ type: 'user.message', content: [{ type: 'text', text:
@@ -7,6 +8,7 @@ export const userEvent = input => ({ type: 'user.message', content: [{ type: 'te
   discord_message_id: input.id,
   speaker: { id: input.authorId, name: input.authorName },
   message: input.text,
+  preferred_sources: preferredSources,
   ...(input.decks?.length ? { official_deck_lookup: input.decks } : {}),
 }) }] });
 

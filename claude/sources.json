@@ -1,0 +1,32 @@
+[
+  {
+    "name": "SVWB Meta（使用者指定的牌組來源）",
+    "url": "https://svwbmeta.com/deck",
+    "use_for": "牌組參考與環境分析優先查這裡。確認更新日期、版本、賽制、資料樣本與牌表來源；這是社群資料，不是官方強度保證。頁面動態載入失敗時可搜尋 site:svwbmeta.com 相關頁面，不可把空白頁或 API 錯誤當成沒有牌組。卡名與卡效再以官方繁中卡片一覽核對。"
+  },
+  {
+    "name": "SCL（使用者指定的社群賽事公告帳號）",
+    "url": "https://x.com/scl_shadowverse",
+    "use_for": "社群賽事日程、報名與參賽資訊優先查看此帳號的最新公開公告。讀取具體貼文及其連結的活動、報名、參賽名單或對戰表頁面，確認同一屆賽事、日期、時區與最新更新。X 無法直接讀取時可搜尋 site:x.com/scl_shadowverse 或該帳號連結的主辦方公開頁面；搜尋摘要不代表完整名單。無法核實時清楚說明，請使用者提供該場貼文或活動連結，不得猜測參賽者或報名狀態。"
+  },
+  {
+    "name": "SVWB 官方 Deck Portal（繁中）",
+    "url": "https://shadowverse-wb.com/cht/deck/",
+    "use_for": "公開牌組、牌組分享與組牌參考；人氣牌組不等於當前競技強度排名。"
+  },
+  {
+    "name": "SVWB 官方卡片一覽（繁中）",
+    "url": "https://shadowverse-wb.com/cht/deck/cardslist/",
+    "use_for": "官方繁中卡名、卡片效果、職業與能力關鍵字。"
+  },
+  {
+    "name": "SVWB 官方公告（繁中）",
+    "url": "https://shadowverse-wb.com/cht/news/",
+    "use_for": "版本、平衡調整、活動與維護；閱讀公告原文並確認發布日期和生效日期。"
+  },
+  {
+    "name": "SVWB 官方賽事入口（繁中）",
+    "url": "https://shadowverse-wb.com/cht/event/",
+    "use_for": "官方賽事行程與主辦方入口；參賽名單、報名截止與對戰表須進入該場活動的主辦方原始頁面確認。"
+  }
+]

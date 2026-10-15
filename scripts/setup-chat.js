@@ -8,7 +8,9 @@ async function main() {
   if (!(app.flags & ((1 << 18) | (1 << 19)))) throw new Error('Enable Message Content Intent in Discord Developer Portal first');
   const agentSpec = JSON.parse(await readFile(new URL('../claude/agent.json', import.meta.url), 'utf8'));
   agentSpec.system = await readFile(new URL('../claude/system-prompt.md', import.meta.url), 'utf8');
-  if (agentSpec.model !== 'claude-haiku-5-5') throw new Error('This bot must use Haiku 5.5');
+  const sources = JSON.parse(await readFile(new URL('../claude/sources.json', import.meta.url), 'utf8'));
+  agentSpec.system += '\n\n## 優先查閱來源\n' + sources.map(s => `- ${s.name}：${s.url}\n  用途：${s.use_for}`).join('\n');
+  if (agentSpec.model?.id !== 'claude-haiku-5-5' || agentSpec.model?.effort?.type !== 'high') throw new Error('This bot must use Haiku 5.5 with high effort');
   let setup = {};
   try { setup = JSON.parse(await readFile('.chat-setup.json', 'utf8')); } catch (e) { if (e.code !== 'ENOENT') throw e; }
   const persist = () => writeFile('.chat-setup.json', JSON.stringify(setup, null, 2) + '\n', { mode: 0o600 });
@@ -45,7 +47,7 @@ async function main() {
     CHAT_ADMIN_TOKEN: secrets.CHAT_ADMIN_TOKEN || randomBytes(32).toString('hex'),
   }, null, 2) + '\n', { mode: 0o600 });
   console.log(JSON.stringify({ bot: app.name, agentId: setup.agentId, agentVersion: setup.agentVersion,
-    environmentId: setup.environmentId, model: 'claude-haiku-5-5', dailyBudgetUSD: 2, timezone: 'Asia/Tokyo' }));
+    environmentId: setup.environmentId, model: 'claude-haiku-5-5', effort: agent.model.effort.type, dailyBudgetUSD: 2, timezone: 'Asia/Tokyo' }));
 }
 
 main().catch(error => {

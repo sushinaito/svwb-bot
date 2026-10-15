@@ -30,7 +30,10 @@ original `wrangler.toml` to deploy this feature.
 
 ## Model and budget
 
-The dedicated agent uses **claude-haiku-5-5**, pinned to a specific agent version.
+The dedicated agent uses **claude-haiku-5-5** with **high effort** and standard
+speed, pinned to a specific agent version. Effort is fixed for each session:
+use `@電競魅魔 reset` once in an existing conversation to start using the new
+effort setting (this clears that conversation's history).
 No subagents, advisors, shell, filesystem, or MCP tools are enabled.
 
 One global Durable Object enforces a **$2/day AI list-cost budget**, resetting at
@@ -76,6 +79,16 @@ No process on the local PC needs to stay running after deployment.
 Edit `claude/system-prompt.md` for the SVWB-only scope, Taiwanese Traditional Chinese
 voice, terminology, sourcing rules, and conversational style. `claude/agent.json`
 sets the fixed Haiku model and enabled tools.
+
+Edit `claude/sources.json` to set preferred deck, card, update, and tournament
+sources, with a purpose for each URL. Setup includes it in the agent prompt and
+the Worker supplies it on every turn, so existing sessions receive source updates
+after redeployment. Add specific community organizers only after verifying their
+pages; the official event index is not a substitute for an event's participant list.
+The user-selected primary community sources are `https://svwbmeta.com/deck`
+for deck information and `https://x.com/scl_shadowverse` for SCL announcements.
+X can reject unauthenticated reads and SVWB Meta uses dynamic content; the prompt
+requires explicit uncertainty and public search/event-link fallbacks.
 
 Apply an intentional prompt change with
 `node --env-file=.env.txt scripts/setup-chat.js --update-agent`, then redeploy using

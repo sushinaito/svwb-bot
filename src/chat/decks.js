@@ -1,5 +1,5 @@
 const BASE = 'https://shadowverse-wb.com';
-const classNames = { 0: '中立', 1: '精靈', 2: '皇家', 3: '巫師', 4: '龍族', 5: '夢魘', 6: '主教', 7: '復仇者' };
+const classNames = { 0: '中立', 1: '精靈', 2: '皇家護衛', 3: '巫師', 4: '龍族', 5: '夜魔', 6: '主教', 7: '復仇者' };
 const ordinaryWords = new Set(['deck', 'code', 'this', 'that', 'with', 'help', 'look', 'give', 'what', 'have', 'your', 'from', 'list', 'card', 'svwb', 'cost', 'does', 'good', 'best', 'like', 'want', 'some', 'here', 'rate', 'play', 'tell', 'make']);
 
 export function deckCodes(text) {
