@@ -1,0 +1,47 @@
+[
+  {
+    "name": "GameWith SVWB 攻略（使用者指定）",
+    "url": "https://gamewith.jp/shadowverse-wb/",
+    "use_for": "SVWB 攻略與遊戲解說；依問題自行搜尋相關文章並閱讀正文，涵蓋新手、系統、規則、卡片、牌組與活動等。核對遊戲、賽制與更新日期；作者建議不是官方規則，卡效以官方核對。 當前牌組強度、最強推薦與多套比較時，閱讀近期強度榜與對應攻略，和其他來源交叉核對。"
+  },
+  {
+    "name": "Game8 SVWB 攻略",
+    "url": "https://game8.jp/shadowverse-beyond/",
+    "use_for": "SVWB 遊戲解說與攻略的補充或交叉來源；依問題閱讀相關正文與日期，不混用舊版 SV。 也用於近期強度榜與牌組評價的獨立比較，不能只當留牌攻略來源。"
+  },
+  {
+    "name": "Shadowverse Wins（使用者指定）",
+    "url": "https://shadowverse-wins.com/",
+    "use_for": "近期連勝牌表、玩家構築與個別投稿；閱讀具體頁面與牌組連結，核對 Worlds Beyond、環境、賽制及投稿日期。連勝是玩家投稿紀錄，不是全服使用率、整體勝率或最強保證。圖片清單未辨識不可猜牌；可用已取得的官方牌組連結進一步讀取。"
+  },
+  {
+    "name": "SVWB Meta（使用者指定的牌組來源）",
+    "url": "https://svwbmeta.com/deck",
+    "use_for": "公開牌表、該站評級與環境樣本的一個來源；問當前最強、強度比較或多套推薦時，應與 GameWith、Game8 的近期評級／攻略或近期賽事交叉比較，不以本站取代全部來源；留牌、起手、打法與對局問題改以 GameWith 等攻略網站為主，樣本占比不是攻略。確認更新日期、版本、賽制、資料樣本與牌表來源；這是社群資料，不是官方強度保證。頁面動態載入失敗時可搜尋 site:svwbmeta.com 相關頁面，不可把空白頁或 API 錯誤當成沒有牌組。卡名與卡效再以官方繁中卡片一覽核對。"
+  },
+  {
+    "name": "SCL（使用者指定的社群賽事公告帳號）",
+    "url": "https://x.com/scl_shadowverse",
+    "use_for": "社群賽事日程、報名與參賽資訊優先查看此帳號的最新公開公告。讀取具體貼文及其連結的活動、報名、參賽名單或對戰表頁面，確認同一屆賽事、日期、時區與最新更新。X 無法直接讀取時可搜尋 site:x.com/scl_shadowverse 或該帳號連結的主辦方公開頁面；搜尋摘要不代表完整名單。無法核實時清楚說明，請使用者提供該場貼文或活動連結，不得猜測參賽者或報名狀態。"
+  },
+  {
+    "name": "SVWB 官方 Deck Portal（繁中）",
+    "url": "https://shadowverse-wb.com/cht/deck/",
+    "use_for": "公開牌組、牌組分享與組牌參考；人氣牌組不等於當前競技強度排名。"
+  },
+  {
+    "name": "SVWB 官方卡片一覽（繁中）",
+    "url": "https://shadowverse-wb.com/cht/deck/cardslist/",
+    "use_for": "官方繁中卡名、卡片效果、職業與能力關鍵字。"
+  },
+  {
+    "name": "SVWB 官方公告（繁中）",
+    "url": "https://shadowverse-wb.com/cht/news/",
+    "use_for": "版本、平衡調整、活動與維護；閱讀公告原文並確認發布日期和生效日期。"
+  },
+  {
+    "name": "SVWB 官方賽事入口（繁中）",
+    "url": "https://shadowverse-wb.com/cht/event/",
+    "use_for": "官方賽事行程與主辦方入口；參賽名單、報名截止與對戰表須進入該場活動的主辦方原始頁面確認。"
+  }
+]

@@ -1,0 +1,38 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "svwb-chat-bot",
+  "main": "src/chat/worker.js",
+  "alias": { "#card-snapshot": "./data/official-cards-cht.json", "#deck-snapshot": "./data/deck-library.json" },
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "services": [{ "binding": "FUN", "service": "svwb-fun-bot" }],
+  "durable_objects": {
+    "bindings": [
+      { "name": "GATEWAY", "class_name": "DiscordGateway" },
+      { "name": "CONVERSATIONS", "class_name": "Conversation" },
+      { "name": "BUDGET", "class_name": "DailyBudget" },
+      { "name": "DECK_LIBRARY", "class_name": "DeckLibrary" },
+      { "name": "PERSONAL_MEMORY", "class_name": "PersonalMemory" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["DiscordGateway", "Conversation", "DailyBudget"] },
+    { "tag": "v2-deck-library", "new_sqlite_classes": ["DeckLibrary"] },
+    { "tag": "v3-personal-memory", "new_sqlite_classes": ["PersonalMemory"] }
+  ],
+  "vars": {
+    "ALLOWED_GUILD_IDS": "653515220731428865,633265552499933205",
+    "CLAUDE_AGENT_ID": "",
+    "CLAUDE_ENVIRONMENT_ID": "",
+    "CLAUDE_AGENT_VERSION": "1",
+    "DAILY_BUDGET_CENTS": "200",
+    "TURN_BUDGET_CENTS": "20",
+    "ANSWER_RESERVE_CENTS": "4",
+    "BUDGET_MARGIN_CENTS": "10",
+    "MAINTENANCE_BUDGET_CENTS": "5",
+    "DAILY_MESSAGE_LIMIT": "100",
+    "THREAD_IDLE_HOURS": "24",
+    "CONTEXT_COMPACT_TOKENS": "80000"
+  },
+  "observability": { "enabled": true }
+}

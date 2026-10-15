@@ -1,0 +1,17 @@
+{
+  "name": "svwb-fun-bot",
+  "main": "src/fun/entry.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "services": [{ "binding": "LEGACY", "service": "svwb-deck-bot" }],
+  "assets": { "directory": "assets", "binding": "ASSETS", "run_worker_first": true },
+  "durable_objects": { "bindings": [{ "name": "STATE", "class_name": "FunState" }, { "name": "RENDERER", "class_name": "CardRenderer" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["FunState", "CardRenderer"] }],
+  "vars": {
+    "DISCORD_APPLICATION_ID": "1485690305582731455",
+    "DISCORD_PUBLIC_KEY": "57f4028cf278d92f7133daf0748041453776236d575a8c246600e9178adcd3f9",
+    "ALLOWED_GUILD_IDS": "653515220731428865,633265552499933205",
+    "LEGACY_INTERACTIONS_URL": "https://svwb-deck-bot.svwb-deckhelper.workers.dev"
+  },
+  "observability": { "enabled": true }
+}
