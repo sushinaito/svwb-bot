@@ -1,5 +1,5 @@
 import { discord, json, missingConfig, sendText } from './api.js';
-import { routeMessage, admitMessage, THREAD_TYPES } from './routing.js';
+import { routeMessage, admitMessage, THREAD_TYPES, isReplyToBot } from './routing.js';
 
 // One outbound Gateway connection for this Discord application. Outbound sockets
 // cannot hibernate; the alarm restores the connection after deploys/eviction.
@@ -30,6 +30,8 @@ export class DiscordGateway {
       allowedGuildIds: String(this.env.ALLOWED_GUILD_IDS || '').split(',').filter(Boolean),
       messageEditsSupported: true,
       botRoleMentionsSupported: true,
+      directRepliesSupported: true,
+      deckPicturesSupported: true,
       chineseOutputGuard: true,
       contextCompaction: { thresholdTokens: Number(this.env.CONTEXT_COMPACT_TOKENS || 80000), idleMinutes: 30 },
       agentVersion: Number(this.env.CLAUDE_AGENT_VERSION || 1),
@@ -214,7 +216,8 @@ export class DiscordGateway {
     if (this.state.limits.seen?.includes(update.id) || this.state.pending.some(m => m.id === update.id)) return;
     if (update.author?.bot || update.webhook_id) return;
     if (!update.mentions?.some(u => u.id === this.state.botId) && !update.mention_roles?.length && !this.state.threads[update.channel_id] &&
-          !new RegExp(`<@!?${this.state.botId}>`).test(update.content) && !/<@&\d+>/.test(update.content)) return;
+          !new RegExp(`<@!?${this.state.botId}>`).test(update.content) && !/<@&\d+>/.test(update.content) &&
+          update.type !== 19 && !update.message_reference) return;
     // Update payloads can omit author/type/mentions. Fetch the complete current
     // message and route it through the same guild, author and budget guards.
     let message;
@@ -228,9 +231,11 @@ export class DiscordGateway {
     if (!message.guild_id || !String(this.env.ALLOWED_GUILD_IDS).split(',').map(s => s.trim()).includes(message.guild_id)) return;
     if (message.author?.bot || message.webhook_id || !message.content) return;
     message = await this.normalizeBotRoleMention(message);
+    message = await this.resolveReply(message);
     const mentioned = message.mentions?.some(u => u.id === this.state.botId);
+    const repliedToBot = isReplyToBot(message, this.state.botId);
     for (const [id, entry] of Object.entries(this.state.threads)) if (entry.expires < Date.now()) delete this.state.threads[id];
-    if (!mentioned && !this.state.threads[message.channel_id]) return;
+    if (!mentioned && !repliedToBot && !this.state.threads[message.channel_id]) return;
     const channel = this.state.threads[message.channel_id] ? { type: 11 } : await discord(this.env, `/channels/${message.channel_id}`);
     const input = routeMessage(message, this.state.botId, channel, this.state.threads, this.env);
     if (!input) return;
@@ -246,7 +251,7 @@ export class DiscordGateway {
     const limits = structuredClone(this.state.limits);
     const admission = admitMessage(limits, input, this.env);
     if (admission !== 'accepted') {
-      if (admission === 'limited' && mentioned) await sendText(this.env, input.channelId, '目前已達聊天次數限制，請稍後再試喔。', input.id, input.id);
+      if (admission === 'limited' && (mentioned || repliedToBot)) await sendText(this.env, input.channelId, '目前已達聊天次數限制，請稍後再試喔。', input.id, input.id);
       return;
     }
     if (this.state.pending.length >= 50) throw new Error('Delivery queue full');
@@ -289,5 +294,19 @@ export class DiscordGateway {
     let content = message.content;
     for (const id of matched) content = content.replaceAll(`<@&${id}>`, `<@${this.state.botId}>`);
     return { ...message, content, mentions: [...(message.mentions || []), { id: this.state.botId }] };
+  }
+
+  async resolveReply(message) {
+    const ref = message.message_reference;
+    if (message.type !== 19 || (ref?.type ?? 0) !== 0 || !ref?.message_id ||
+        (ref.channel_id && ref.channel_id !== message.channel_id) ||
+        (ref.guild_id && ref.guild_id !== message.guild_id) || message.referenced_message !== undefined) return message;
+    try {
+      const target = await discord(this.env, `/channels/${message.channel_id}/messages/${ref.message_id}`);
+      return { ...message, referenced_message: target };
+    } catch (error) {
+      if ([403, 404].includes(error.status)) return message;
+      throw error;
+    }
   }
 }

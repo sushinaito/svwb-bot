@@ -1,5 +1,6 @@
 import { json } from './api.js';
 import { metaContext } from './meta.js';
+import { deckPictures, fetchDeckPicture } from './pictures.js';
 export { DiscordGateway } from './gateway.js';
 export { Conversation } from './conversation.js';
 export { DailyBudget } from './budget.js';
@@ -16,7 +17,13 @@ export default {
     if (path.endsWith('/source-health')) {
       let diagnostic;
       const result = await metaContext('最近最強的龍族牌組有啥', fetch, d => { diagnostic = d; });
-      return json({ status: result.status, diagnostic, window: result.window, archetypes: result.archetypes?.map(a => a.name) });
+      const picture = deckPictures({ meta: result }, result.archetypes?.[0]?.name || '')[0];
+      let image = { status: 'unavailable' };
+      if (picture) {
+        try { const blob = await fetchDeckPicture(picture); image = { status: 'ok', type: blob.type, bytes: blob.size }; }
+        catch { image = { status: 'unavailable' }; }
+      }
+      return json({ status: result.status, diagnostic, window: result.window, archetypes: result.archetypes?.map(a => a.name), image });
     }
     const response = await env.GATEWAY.getByName('discord').fetch(`https://gateway${path.replace('/admin', '')}`, { method: request.method });
     if (path.endsWith('/status')) {

@@ -27,8 +27,8 @@ export async function discord(env, path, method = 'GET', body, fetcher) {
     try {
       return await api(`https://discord.com/api/v10${path}`, {
         method,
-        headers: { Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`, 'Content-Type': 'application/json' },
-        body: body === undefined ? undefined : JSON.stringify(body),
+        headers: { Authorization: `Bot ${env.DISCORD_BOT_TOKEN}`, ...(body instanceof FormData ? {} : { 'Content-Type': 'application/json' }) },
+        body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
       }, 'Discord', fetcher);
     } catch (error) {
       // A 429 explicitly rejects the request, so retrying this individual chunk
@@ -82,12 +82,17 @@ export function splitMessage(text, limit = 1900) {
 export async function sendText(env, channelId, text, nonceSeed, replyTo) {
   const chunks = splitMessage(text);
   for (let i = 0; i < chunks.length; i++) {
-    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${nonceSeed}:${i}`));
-    const nonce = [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('').slice(0, 24);
+    const nonce = await messageNonce(`${nonceSeed}:${i}`);
     await discord(env, `/channels/${channelId}/messages`, 'POST', {
       content: chunks[i], allowed_mentions: { parse: [], replied_user: false },
       nonce, enforce_nonce: true,
+      flags: 4,
       ...(i === 0 && replyTo ? { message_reference: { message_id: replyTo, fail_if_not_exists: false } } : {}),
     });
   }
+}
+
+export async function messageNonce(seed) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(seed));
+  return [...new Uint8Array(digest)].map(x => x.toString(16).padStart(2, '0')).join('').slice(0, 24);
 }

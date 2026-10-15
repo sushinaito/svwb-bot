@@ -75,6 +75,7 @@ test('Discord output is bounded, Unicode-safe and suppresses all mentions', asyn
   assert.equal(bodies[pieces.length].nonce, first);
   assert.deepEqual(bodies[0].allowed_mentions, { parse: [], replied_user: false });
   assert.ok(bodies.every(b => b.enforce_nonce));
+  assert.ok(bodies.every(b => b.flags === 4), 'Suppress website previews');
 });
 
 test('upstream errors do not reveal secret headers, URLs or response bodies', async () => {

@@ -3,6 +3,7 @@ import { deckContext } from './decks.js';
 import { metaContext } from './meta.js';
 import { needsChineseRewrite, rewriteEvent } from './language.js';
 import { compactionThreshold, requestContextTokens, summaryEvent } from './context.js';
+import { sendDeckPictures } from './pictures.js';
 import preferredSources from '../../claude/sources.json' with { type: 'json' };
 
 const cap = cents => ({ type: 'limit', max_list_cost: { amount: String(cents), currency: 'USD' } });
@@ -11,6 +12,7 @@ export const userEvent = input => ({ type: 'user.message', content: [{ type: 'te
   discord_message_id: input.id,
   speaker: { id: input.authorId, name: input.authorName },
   message: input.text,
+  ...(input.replyContext ? { replying_to_bot_message: input.replyContext } : {}),
   preferred_sources: preferredSources,
   ...(input.decks?.length ? { official_deck_lookup: input.decks } : {}),
   ...(input.meta ? { svwbmeta_lookup: input.meta } : {}),
@@ -317,6 +319,13 @@ export class Conversation {
     if (answer && !needsRewrite && !job.compacting) {
       await sendText(this.env, job.input.channelId, answer, `${job.input.id}:answer`, job.input.id);
       job.outputChars = answer.length;
+      if (!job.picturesHandled) {
+        await sendDeckPictures(this.env, job.input, answer).catch(error => {
+          console.log('deck_picture_delivery_failed', { status: error.status || null });
+        });
+        job.picturesHandled = true;
+        await this.save();
+      }
     } else if (needsRewrite) {
       job.notice ||= '這次沒能把資料完整整理成繁體中文，我先不貼未翻譯的內容。可以縮小問題再問一次。';
     }

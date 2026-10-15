@@ -9,6 +9,9 @@ original `wrangler.toml` to deploy this feature.
 
 - In 納薩利克地下大造咖 and backup, mention the bot in a channel to chat. Each person's
   channel conversation has separate memory, although replies remain visible there.
+- Discord's Reply action on one of her messages also works without mentioning her,
+  even with the reply notification turned off. The quoted bot message is included
+  as context; another person's separate conversation history is not imported.
 - Mention the bot once inside a thread. Everyone in that thread can then chat
   without mentioning it again. The thread shares one conversation history.
 - Thread participation expires after 24 hours without an accepted message.
@@ -20,6 +23,11 @@ original `wrangler.toml` to deploy this feature.
   a message already accepted by the bot does not generate a duplicate response;
   send a new message for corrections to an answered question.
 - Attachment uploads are not sent to Claude in this version. Paste relevant text.
+- Recommended decks with official Portal hash links include up to two Traditional
+  Chinese deck pictures as file attachments. URL previews are suppressed; source
+  links stay clickable. Image failures leave the text answer available. The bot
+  needs Attach Files permission. Deck-code-only links without a hash are currently
+  text links.
 - Web search/fetch are available. Private saved decks and deck database tools are
   not connected to Claude; the existing slash commands continue to handle them.
 - Natural requests such as `@電競魅魔 幫我看看這副牌：y8hf` automatically look up
