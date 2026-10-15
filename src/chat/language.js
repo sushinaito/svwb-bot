@@ -9,7 +9,9 @@ export function needsChineseRewrite(answer, request) {
     // Japanese grammar within a sentence instead of counting names globally.
     prose.split(/[。！？\n]/).some(sentence => {
       const hiragana = (sentence.match(/[\u3041-\u3096]/g) || []).length;
+      const katakana = (sentence.match(/[\u30a1-\u30faー]/g) || []).length;
       return (hiragana >= 3 && /(?:です|ます|ません)(?:[、」』）)]|$)/.test(sentence)) ||
+        (katakana >= 12 && /[\u30a1-\u30faー]{2,}[のをがにでと][\p{L}\d]{2,}/u.test(sentence)) ||
         (hiragana >= 8 && hiragana / Math.max(1, (sentence.match(/\p{L}/gu) || []).length) >= 0.15);
     });
 }

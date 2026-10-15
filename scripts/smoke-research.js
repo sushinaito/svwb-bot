@@ -13,7 +13,7 @@ const cases = [
   { name: 'game-system', text: '剛開始玩 SVWB，想跟朋友對戰要怎麼開房間？手機和電腦能一起玩嗎？' },
   { name: 'rotation-regression', text: '下版退環境的牌' },
   { name: 'current-news', text: 'SVWB 最近一次維護是什麼時候？具體改了哪些內容？' },
-  { name: 'tempo-elf-existing-session', text: '來一套節奏妖精', old: true },
+  { name: 'tempo-elf-existing-session', text: '來一套節奏妖', old: true, deckDelivery: true },
   { name: 'dragon-rotation-budget-regression', text: '下版本龍族退掉什麼牌', replay: true },
   { name: 'complete-rotation-list', text: '下版本全部退環境的牌，全部職業與中立都列出，不要只給重點', completeList: true },
 ];
@@ -24,7 +24,7 @@ const budget = new DailyBudget(budgetCtx, env); await budgetCtx.ready;
 env.BUDGET = { getByName: () => ({ fetch: (url, init) => budget.fetch(new Request(url, init)) }) };
 for (const [index, item] of cases.entries()) {
   if (process.argv[2] ? !process.argv[2].split(',').map(Number).includes(index) : index > 2) continue;
-  const replies = [], ctx = new FakeContext(), conversation = new Conversation(ctx, env); await ctx.ready;
+  const replies = [], attachments = [], ctx = new FakeContext(), conversation = new Conversation(ctx, env); await ctx.ready;
   let original, finalization = false, completionEvents = [], completionCost = 0;
   const createdSessions = new Set();
   let replay;
@@ -38,7 +38,17 @@ for (const [index, item] of cases.entries()) {
   globalThis.fetch = async (url, init) => {
     // All Discord operations are local captures: no test messages are posted.
     if (new URL(url).hostname === 'discord.com') {
-      if (String(url).endsWith('/messages') && !(init.body instanceof FormData)) replies.push(JSON.parse(init.body).content);
+      if (String(url).endsWith('/messages')) {
+        if (init.body instanceof FormData) {
+          const payload = JSON.parse(init.body.get('payload_json'));
+          replies.push(payload.content);
+          for (const a of payload.attachments || []) {
+            const file = init.body.get(`files[${a.id}]`);
+            attachments.push({ ...a, size: file.size, type: file.type });
+            await writeFile(`.wrangler/research-${index}-${a.filename}`, new Uint8Array(await file.arrayBuffer()));
+          }
+        } else replies.push(JSON.parse(init.body).content);
+      }
       return Response.json({ id: 'local-test-reply' });
     }
     if (new URL(url).hostname === 'api.anthropic.com' && init?.method === 'DELETE' && conversation.state.current?.completionSessionId === new URL(url).pathname.split('/').at(-1)) {
@@ -84,10 +94,12 @@ for (const [index, item] of cases.entries()) {
     const result = { case: item.name, version: session.agent.version, reply: replies.join('\n'), costCents: readCost(session),
       sessionPreserved: !original || original.id === id, blocked: conversation.state.blocked || null,
       tools: events.filter(e => /tool_use$/.test(e.type)).map(e => ({ type: e.type, name: e.name, input: e.input })),
-      finalization, completionCost, totalCostCents: readCost(session) + completionCost, chunks: replies.length,
+      finalization, completionCost, totalCostCents: readCost(session) + completionCost, chunks: replies.length, attachments,
     };
     await writeFile(`.wrangler/research-${index}.json`, JSON.stringify({ result, events, completionEvents }, null, 2));
     console.log(JSON.stringify(result));
+    if (item.deckDelivery && (!attachments.some(a => a.type === 'image/png' && a.size > 1024) ||
+      !/牌組代碼：`[a-z0-9]{4}`/i.test(result.reply))) throw Error('Verified deck code or PNG attachment missing');
     if (item.completeList) {
       const { cardCatalog } = await import('../src/chat/cards.js');
       const expected = await cardCatalog({pack_id:10004},0,realFetch,{limit:120});

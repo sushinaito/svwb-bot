@@ -98,7 +98,7 @@ export class Conversation {
         await probe.body?.cancel();
       } catch { /* Keep deployment health readable while the service updates. */ }
       return json({ funVersion: FUN_VERSION, tools: [...agentSpec.tools, ...FUN_TOOLS].map(t => t.name || t.type),
-        rendererConfigured, rendererAuthenticated, catalogBatching: true });
+        rendererConfigured, rendererAuthenticated, catalogBatching: true, deckDeliveryVersion: 1, naturalResponseStyle: true });
     }
     const input = await request.json();
     if (this.state.seen.includes(input.id)) return json({ accepted: true, duplicate: true });
@@ -321,7 +321,7 @@ export class Conversation {
         events: job.finalizePending ? [event, { type: 'system.message', content: [{ type: 'text', text: '僅此則收尾回答：根據已有證據直接用自然台灣繁中回答，約300～600字元。引用只能附來源連結，不能貼英文或日文原句。專名可保留原文。不要再搜尋或呼叫工具；先給能確認的結論，再精確指出缺口。下一輪恢復正常查證。' }] }] : [event,
           ...(this.state.researchPolicyVersion === 2 && job.compacting ? [] : [{ type: 'system.message', content: [{ type: 'text', text:
             (this.state.researchPolicyVersion === 2 ? '' : '查證流程更新：以此通用流程取代先前針對個別問題的查詢指引。\n' + RESEARCH_GUIDANCE) +
-            (job.compacting ? '' : FUN_GUIDANCE) }] }])],
+            (job.compacting ? '' : FUN_GUIDANCE + RESPONSE_STYLE) }] }])],
       }); }
       catch (error) {
         if (imageBlocks.length && [400,413].includes(error.status)) {

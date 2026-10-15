@@ -85,3 +85,28 @@ test('delivery errors remain retryable and existing conversations use the shared
   await assert.rejects(conv.finish());
   assert.notEqual(conv.state.current.picturesHandled, true);
 });
+
+test('decks discovered by a research tool survive a restart before the tool result is accepted', async t => {
+  const ctx = new FakeContext(), conv = new Conversation(ctx, env); await ctx.ready;
+  conv.state.sessionId = 'test';
+  conv.state.current = { input: input(), phase: 'poll', userProcessed: true, seenEvents: [] };
+  const fixtures = {
+    '/api/manifest': { files: { 'deck.rotation.14': 'summary.json', cards: 'cards.json', archetypes: 'labels.json', 'archdeck.rotation.elf': 'elf.json' } },
+    '/data/summary.json': { window: { from: '2026-10-01', to: '2026-10-14' }, classes: [{ class: 'Elf', total: 1, archetypes: [{ id: 'elf', name: 'elf', builds: 1 }] }] },
+    '/data/labels.json': { elf: { 'zh-Hant': '節奏進化妖' } },
+    '/data/cards.json': Object.fromEntries(cards.map(c => [c.id, { names: { 'zh-Hant': '卡片' + c.id }, cost: 1 }])),
+    '/data/elf.json': { decks: [{ deckUrl: url, cards: cards.map(c => ({ cardId: c.id, count: c.quantity })) }] },
+  };
+  t.mock.method(globalThis, 'fetch', async (raw, init) => {
+    const u = new URL(raw);
+    if (u.hostname === 'svwbmeta.com') return Response.json(fixtures[u.pathname]);
+    if (init?.method === 'POST') throw Error('Lost result acknowledgement');
+    return Response.json({ data: [{ id: 'tool1', type: 'agent.custom_tool_use', name: 'query_svwb_data',
+      input: { resource: 'meta', query: '精靈牌組' }, processed_at: '2026-10-15T10:00:00Z' }] });
+  });
+  await assert.rejects(conv.poll());
+  const restarted = new Conversation(ctx, env); await ctx.ready;
+  assert.equal(restarted.state.current.input.deliveryDecks.length, 1);
+  assert.deepEqual(restarted.state.current.input.deliveryDecks[0].cards, cards);
+  assert.equal(restarted.state.current.toolResults.tool1.sent, false);
+});

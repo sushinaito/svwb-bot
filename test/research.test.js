@@ -6,6 +6,7 @@ import { needsChineseRewrite } from '../src/chat/language.js';
 test('Japanese proper names do not discard a Chinese answer, while untranslated prose still gets repaired', () => {
   assert.equal(needsChineseRewrite('下一版退出的是「蒼空の六竜」。ギルネリーゼ、ガルミーユ、クルル、マーウィン屬於上一批，並不是這次。', '下版退環境的牌'), false);
   assert.equal(needsChineseRewrite('上方修正6枚、下方修正1枚の計7枚のカード能力が変更となります。', '維護內容'), true);
+  assert.equal(needsChineseRewrite('優先留低費牌。攻略建議是 2〜3コストの低コスト帯フォロワーをキープ；中盤再展開。', '來一套牌'), true);
   assert.equal(needsChineseRewrite('龍族的特色是PPの最大値を増やせるPPブーストが得意なこと。シャドバの最強デッキです。', '龍族'), true);
   assert.equal(needsChineseRewrite('這次有7張卡變更，ロイヤル3枚、ウィッチ1枚、ネメシス3枚の3クラス計7枚が能力変更の対象です。', '版本變更'), true);
 });

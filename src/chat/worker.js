@@ -5,6 +5,7 @@ import { imageBlock } from './vision.js';
 import { cardContext } from './cards.js';
 import { guideContext } from './guides.js';
 import { executeResearchTool } from './research.js';
+import { publishDeckCode } from './decks.js';
 export { DiscordGateway } from './gateway.js';
 export { Conversation } from './conversation.js';
 export { DailyBudget } from './budget.js';
@@ -36,7 +37,9 @@ export default {
       const wins = await executeResearchTool('read_svwb_source', { url: 'https://shadowverse-wins.com/' });
       const shorthand = await cardContext('quick blader');
       const catalog = await executeResearchTool('query_svwb_data', { resource: 'catalog', view: 'packs' });
-      const picture = deckPictures({ meta: result }, result.archetypes?.[0]?.name || '')[0];
+      const example = result.archetypes?.[0]?.decks?.[0];
+      const picture = deckPictures({ meta: result }, example?.deckUrl || '')[0];
+      const deckCode = picture ? await publishDeckCode(picture.deckUrl, example.cards) : { status: 'unavailable' };
       let image = { status: 'unavailable' };
       if (picture) {
         try {
@@ -46,7 +49,7 @@ export default {
         }
         catch { image = { status: 'unavailable' }; }
       }
-      return json({ status: result.status, diagnostic, window: result.window, archetypes: result.archetypes?.map(a => a.name), image, card,
+      return json({ status: result.status, diagnostic, window: result.window, archetypes: result.archetypes?.map(a => a.name), image, deckCode, card,
         generalResearch: { status: source.status, source: source.source, characters: source.text?.length, headings: source.headings?.length },
         wins: { status: wins.status, source: wins.source, characters: wins.text?.length },
         catalog: { status: catalog.status, verification: catalog.verification, total: catalog.total, packs: catalog.packs },
