@@ -60,6 +60,17 @@ test('JST midnight rollover carries in-flight reservations and does not refund u
   assert.equal(reserveTurn(state, env, 'm1', after).approved, false);
 });
 
+test('temporary reservations can deny a turn then release capacity, distinct from daily exhaustion', () => {
+  const state = { days: { [jstDay()]: 150 }, turns: {} };
+  assert.equal(reserveTurn(state, env, 'first').approved, true);
+  assert.equal(reserveTurn(state, env, 'second').reason, 'budget_reserved');
+  settleTurn(state, 'first', 3);
+  assert.equal(reserveTurn(state, env, 'second').approved, true);
+  settleTurn(state, 'second', 20);
+  assert.equal(reserveTurn(state, env, 'third').reason, 'daily_budget');
+  assert.equal(budgetStatus(state, env).capCents, 200);
+});
+
 test('Discord output is bounded, Unicode-safe and suppresses all mentions', async t => {
   const text = 'a'.repeat(1899) + '😀' + 'b'.repeat(3000);
   const pieces = splitMessage(text);

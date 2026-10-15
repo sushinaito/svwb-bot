@@ -11,7 +11,7 @@ const safeLink = (raw, hosts) => {
   catch { return undefined; }
 };
 
-async function readJson(path, fetcher, signal) {
+export async function readJson(path, fetcher, signal) {
   const response = await fetcher(BASE + path, { signal, redirect: 'manual' });
   if (!response.ok) { await response.body?.cancel(); throw Error(`Source HTTP ${response.status}`); }
   const reader = response.body.getReader(), chunks = [];

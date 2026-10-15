@@ -208,6 +208,14 @@ Cloudflare stores the conversation queue and routing metadata. Claude stores eac
 conversation's transcript. A conversation reset deletes its Claude session.
 
 References:
+- Card-name questions use the public SVWB Meta multilingual index (cached for five
+  minutes) to identify up to three candidates, then fetch each official card's
+  details from the same API used by its card page. Answers can include Japanese
+  voice actor, illustrator, cost and effects with the direct official card link.
+  Ambiguous names remain separate candidates; unavailable details are not guessed.
+  Pronoun follow-ups can use a quoted message or card IDs from this conversation
+  within 30 minutes. `reset` clears those IDs too. `/admin/source-health` verifies
+  this official lookup without sending a Discord message or using AI tokens.
 - https://platform.claude.com/docs/en/managed-agents/events-and-streaming
 - https://platform.claude.com/docs/en/managed-agents/budgets
 - https://docs.discord.com/developers/events/gateway

@@ -2,6 +2,7 @@ import { json } from './api.js';
 import { metaContext } from './meta.js';
 import { deckPictures, fetchDeckPicture } from './pictures.js';
 import { imageBlock } from './vision.js';
+import { cardContext } from './cards.js';
 export { DiscordGateway } from './gateway.js';
 export { Conversation } from './conversation.js';
 export { DailyBudget } from './budget.js';
@@ -19,6 +20,7 @@ export default {
       let diagnostic;
       const result = await metaContext('最近最強的龍族牌組有啥', fetch, d => { diagnostic = d; });
       const overview = await metaContext('現在比賽和排位最多人用的牌組是？');
+      const card = await cardContext('芭芭蘿絲的聲優是誰？');
       const picture = deckPictures({ meta: result }, result.archetypes?.[0]?.name || '')[0];
       let image = { status: 'unavailable' };
       if (picture) {
@@ -29,7 +31,7 @@ export default {
         }
         catch { image = { status: 'unavailable' }; }
       }
-      return json({ status: result.status, diagnostic, window: result.window, archetypes: result.archetypes?.map(a => a.name), image,
+      return json({ status: result.status, diagnostic, window: result.window, archetypes: result.archetypes?.map(a => a.name), image, card,
         overview: { status: overview?.status, scope: overview?.scope, sampledBuilds: overview?.sampledBuilds,
           classCount: overview?.classes?.length, topArchetypes: overview?.archetypes?.slice(0, 3).map(a => ({ name: a.name, sampledBuilds: a.sampledBuilds })),
           tournament: overview?.tournament, strength: overview?.strength } });
