@@ -336,6 +336,18 @@ References:
   Same-turn card corrections PATCH the existing image, even with a new tool ID;
   duplicate content reuses the delivered result. Distinct requested cards use
   explicit card slots. Final text edits preserve the uploaded embed.
+  A research-budget handoff retains card creation as the requested outcome:
+  explicit card requests get a completion agent with only `make_custom_card`,
+  within the same remaining allowance. It performs no more research. Current
+  attachment metadata survives the handoff, including when vision decoding failed;
+  the renderer loads artwork independently. Successful rendering ends completion
+  without an extra model acknowledgement. Capability questions and explicitly
+  text-only designs remain tool-free; failures never claim a PNG was delivered.
+  `cardCompletionVersion=1` is included in runtime verification. Regression tests
+  cover the reduced allowance after compaction and stale old-artwork memories.
+  Run `node --conditions=card-cache --env-file=.env.txt scripts/smoke-card-completion.js`
+  for a disposable live test using only new fictional facts and a synthetic PNG.
+  It intercepts every Discord send and saves the real renderer output locally.
 - `npm run decks:sync` saves complete community 40-card lists to the private,
   Git-ignored `data/deck-library.json`. The initial October 15 snapshot has 363
   distinct builds from the current SVWB Meta rotation/unlimited files and linked

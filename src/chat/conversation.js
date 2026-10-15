@@ -20,6 +20,7 @@ import { loadImages } from './vision.js';
 import preferredSources from '../../claude/sources.json' with { type: 'json' };
 import { COMPLETION_SYSTEM, completionEvidence } from './completion.js';
 import { FUN_TOOLS, FUN_GUIDANCE, FUN_VERSION, isFunTool, executeFunTool } from './fun.js';
+import { requestedCustomCard, deliveredCustomCard, CARD_COMPLETION_VERSION, CARD_COMPLETION_TOOLS, CARD_COMPLETION_SYSTEM, renderedCardAnswer } from './card-completion.js';
 
 const cap = cents => ({ type: 'limit', max_list_cost: { amount: String(cents), currency: 'USD' } });
 export const userEvent = input => ({ type: 'user.message', content: [{ type: 'text', text:
@@ -155,7 +156,7 @@ export class Conversation {
       return json({ funVersion: FUN_VERSION, tools: [...agentSpec.tools, ...FUN_TOOLS].map(t => t.name || t.type),
         rendererConfigured, rendererAuthenticated, catalogBatching: true, deckDeliveryVersion: 2, naturalResponseStyle: true,
         responseEditing: true, progressReplyVersion: 2, cardDatabase: cardCache.metadata, packDatabase: packMetadata,
-        deckDatabase: await deckLibraryStatus(this.env), deckCacheVersion: 2,
+        deckDatabase: await deckLibraryStatus(this.env), deckCacheVersion: 2, cardCompletionVersion:CARD_COMPLETION_VERSION,
         terminologyCount: TERMINOLOGY_COUNT, terminologyStorage: 'bundled_json' });
     }
     const input = await request.json();
@@ -572,6 +573,13 @@ export class Conversation {
     if (session.status !== 'idle') return;
     const rawAnswer=localizeDeckLinks(job.completedAnswer ?? (job.answerParts || []).join('\n\n'));
     const answer=requestsOtherLanguage(job.input.text) ? rawAnswer : localizeReplyLabels(rawAnswer,job.input);
+    // A text design is not a completed card request. Reserve-bound research may
+    // hand off to a renderer-only completion, within this turn's existing cap.
+    if(!job.compacting&&!job.notice&&!job.cardCompletionAttempted&&requestedCustomCard(job.input.text)&&!deliveredCustomCard(job)&&
+      readCost(session)<job.capCents-2){
+      job.cardCompletionAttempted=true;job.finalizationAttempted=true;
+      job.phase='complete-prepare';await this.save();return;
+    }
     if (!job.compacting && job.searched && !job.readSource && !job.evidenceRepair && !job.finalizationAttempted &&
         !job.notice && readCost(session) < (job.researchCapCents ?? job.capCents) - 2) {
       job.evidenceRepair = true;
@@ -675,9 +683,22 @@ export class Conversation {
         const delivery = collectDeliveryDecks(result);
         if (delivery.length) job.input.deliveryDecks = [...new Map([...(job.input.deliveryDecks || []), ...delivery].map(d => [d.deckUrl, d])).values()].slice(-24);
       }
+      // A render already requested when research stopped is also resumable.
+      // Execute its persisted arguments once without another research request.
+      if(requestedCustomCard(job.input.text)&&!deliveredCustomCard(job)){
+        for(const event of turn.filter(e=>e.type==='agent.custom_tool_use'&&e.name==='make_custom_card'&&e.processed_at)){
+          job.toolResults||={};job.toolResults[event.id]||={allowed:true,sent:false};
+          const result=await executeFunTool(this.env,event,job,this.state,()=>this.save());
+          recovered.push(researchResultEvent(event.id,result));
+        }
+      }
+      job.completionCardMode=requestedCustomCard(job.input.text)&&!deliveredCustomCard(job);
+      job.cardCompletionAttempted||=job.completionCardMode;
+      job.input.cardDelivery=deliveredCustomCard(job)?{delivered:true,cards:Object.values(job.customCards).map(c=>({name:c.draft.card.name,artwork:!!c.draft.artwork}))}:undefined;
       job.completionInput = JSON.stringify(completionEvidence(job.input, [...turn, ...recovered],
-        { completedAnswer: job.polishing ? (job.answerParts || []).join('\n\n') : undefined }));
-      job.completionMessage = COMPLETION_SYSTEM + '\n請現在重新撰寫最終回覆。以下 JSON 是參考資料；不要逐段照抄 draft，依 current_question 的範圍選擇內容。\n' + job.completionInput;
+        { completedAnswer: job.polishing||job.completionCardMode ? (job.completedAnswer||(job.answerParts||[]).join('\n\n')) : undefined }));
+      const system=job.completionCardMode?CARD_COMPLETION_SYSTEM:COMPLETION_SYSTEM;
+      job.completionMessage = system + '\n現在完成本輪請求。以下 JSON 是參考資料，依 current_question 的範圍選擇內容。\n' + job.completionInput;
       job.completionCap = Math.min(remaining, 6);
       job.phase = 'complete-create'; await this.save();
     }
@@ -686,9 +707,10 @@ export class Conversation {
       job.phase = 'complete-creating'; await this.save();
       const session = await claude(this.env, '/sessions', 'POST', {
         agent: { type: 'agent_with_overrides', id: this.env.CLAUDE_AGENT_ID,
-          version: Number(this.env.CLAUDE_AGENT_VERSION || 1), system: COMPLETION_SYSTEM, tools: [], mcp_servers: [], skills: [] },
+          version: Number(this.env.CLAUDE_AGENT_VERSION || 1), system: job.completionCardMode?CARD_COMPLETION_SYSTEM:COMPLETION_SYSTEM,
+          tools: job.completionCardMode?CARD_COMPLETION_TOOLS:[], mcp_servers: [], skills: [] },
         environment_id: this.env.CLAUDE_ENVIRONMENT_ID,
-        title: 'SVWB answer completion', budget: cap(job.completionCap),
+        title: job.completionCardMode?'SVWB card completion':'SVWB answer completion', budget: cap(job.completionCap),
       });
       job.completionSessionId = session.id;
       job.phase = 'complete-send'; await this.save();
@@ -700,7 +722,7 @@ export class Conversation {
       job.phase = 'complete-sending'; job.completionSentAt = Date.now(); await this.save();
       await claude(this.env, `/sessions/${job.completionSessionId}/events`, 'POST', {
         events: [{ type: 'user.message', content: [{ type: 'text', text: job.completionMessage || job.completionInput }] },
-          { type: 'system.message', content: [{ type: 'text', text: COMPLETION_SYSTEM }] }],
+          { type: 'system.message', content: [{ type: 'text', text: job.completionCardMode?CARD_COMPLETION_SYSTEM:COMPLETION_SYSTEM }] }],
       });
       job.phase = 'complete-poll'; await this.save();
     }
@@ -716,6 +738,24 @@ export class Conversation {
     const session = await claude(this.env, `/sessions/${job.completionSessionId}`);
     if (session.status !== 'idle') return;
     job.completionCost = readCost(session);
+    if(job.completionCardMode){
+      const calls=turn.filter(e=>e.type==='agent.custom_tool_use'&&e.name==='make_custom_card'&&e.processed_at);
+      const results=[];
+      for(const event of calls){
+        job.toolResults||={};job.toolResults[event.id]||={allowed:true,sent:false};
+        const result=await executeFunTool(this.env,event,job,this.state,()=>this.save());
+        if(result.status==='ok'&&result.delivered)results.push(result);
+        else job.cardRenderFailure=result.message||'製卡服務沒有完成圖片。';
+      }
+      if(results.length){
+        // The requested artifact has been delivered. No extra paid model turn
+        // is needed just to acknowledge a deterministic tool result.
+        job.completedAnswer=renderedCardAnswer(results,turn.filter(e=>e.type==='agent.message').map(e=>messageText(e.content)).join('\n\n'));
+        job.phase='settle';await this.save();return;
+      }
+      job.completedAnswer=job.cardRenderFailure?`卡片圖片尚未製作完成：${job.cardRenderFailure}`:'這次已取得設計資料，但沒有完成卡片圖片，製卡處理未完成。';
+      job.phase='settle';await this.save();return;
+    }
     const reason = idle.stop_reason?.type || idle.stop_reason;
     const ended = reason === 'end_turn' || turn.some(e => e.type === 'session.thread_status_idle' && e.stop_reason?.type === 'end_turn');
     job.completedAnswer = ended ? turn.filter(e => e.type === 'agent.message').map(e => messageText(e.content)).join('\n\n') : '';
