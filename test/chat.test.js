@@ -89,7 +89,7 @@ test('citation-separated text blocks preserve sentences and deliberate paragraph
   '這套牌會強化守護從者。\n\n接著穩住場面。');
 });
 
-async function harness(t) {
+async function harness(t, answers = []) {
   const budgetCtx = new FakeContext();
   const budget = new DailyBudget(budgetCtx, env);
   await budgetCtx.ready;
@@ -115,7 +115,7 @@ async function harness(t) {
       const event = { ...body.events[0], id: `user_${sequence}`, processed_at: stamp() };
       events.push(event);
       if (autoAnswer && event.type === 'user.message') {
-        events.push({ id: `reply_${sequence}`, type: 'agent.message', processed_at: stamp(), content: [{ type: 'text', text: `Answer ${sequence}` }] });
+        events.push({ id: `reply_${sequence}`, type: 'agent.message', processed_at: stamp(), content: [{ type: 'text', text: answers.shift() || `Answer ${sequence}` }] });
         events.push({ id: `idle_${sequence}`, type: 'session.status_idle', processed_at: stamp(), stop_reason: { type: 'end_turn' } });
         usage += 2;
       }
@@ -151,6 +151,39 @@ test('two conversational turns reuse the pinned agent session and never replay o
   assert.equal(budgetStatus(h.budget.state, env).reservedCents, 0);
   await h.enqueue(input('m2'));
   assert.equal(h.conversation.state.queue.length, 0);
+});
+
+test('foreign search prose is withheld and rewritten once within the original budget', async t => {
+  const foreign = '龍族的特色是PPの最大値を増やせるPPブーストが得意なこと。シャドバの最強デッキです。';
+  const h = await harness(t, [foreign, '跳費龍會先增加 PP 上限，再用高費從者取得優勢。']);
+  await h.enqueue(input('language', { text: '怎麼玩跳費龍', meta: null }));
+  await h.conversation.alarm();
+  assert.equal(h.replies.length, 0, 'Do not publish the untranslated draft');
+  assert.equal(h.conversation.state.current.phase, 'send');
+  await h.conversation.alarm();
+  assert.deepEqual(h.replies, ['跳費龍會先增加 PP 上限，再用高費從者取得優勢。']);
+  assert.equal(h.conversation.state.current, null);
+  assert.equal(h.calls.filter(c => c.body?.budget).length, 1, 'Repair cannot increase the session cap');
+  assert.equal(budgetStatus(h.budget.state, env).accountedCents, 5);
+});
+
+test('a failed language rewrite stops after one retry and never sends the foreign draft', async t => {
+  const foreign = 'This deck is very powerful because it can play large followers earlier than other decks.';
+  const h = await harness(t, [foreign, foreign]);
+  await h.enqueue(input('language')); await h.conversation.alarm(); await h.conversation.alarm();
+  assert.equal(h.conversation.state.current, null);
+  assert.equal(h.calls.filter(c => c.path.endsWith('/events') && c.method === 'POST').length, 2);
+  assert.equal(h.replies.length, 1);
+  assert.match(h.replies[0], /繁體中文/);
+  assert.ok(!h.replies[0].includes('This deck'));
+});
+
+test('an explicit request for an English answer bypasses the default-language guard', async t => {
+  const english = 'This deck is very powerful because it can play large followers earlier than other decks.';
+  const h = await harness(t, [english]);
+  await h.enqueue(input('language', { text: '請用英文回答 SVWB 的玩法' })); await h.conversation.alarm();
+  assert.deepEqual(h.replies, [english]);
+  assert.equal(h.conversation.state.current, null);
 });
 
 test('initial idle and prior turn history cannot finish or duplicate a pending reply', async t => {

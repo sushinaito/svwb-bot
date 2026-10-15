@@ -110,6 +110,17 @@ versioned JSON, so answers do not depend on Claude being able to render its page
 The adapter supplies the 14-day sample window, Traditional Chinese archetype/card
 names and at most two example lists. Sample shares are not win rates. Fetches are
 bounded and failures are explicit; it does not scrape private or logged-in data.
+Cloudflare fetches use `redirect: 'manual'` and reject non-success statuses;
+Workers do not support Node's `redirect: 'error'` option. Run
+`node scripts/chat-admin.js source-health` after deployment to verify the actual
+edge runtime can retrieve the manifest, summary, labels, cards and example lists.
+This authenticated check does not call Claude or post to Discord.
+
+Answers are held until the turn finishes. A heuristic detects long English
+sentences or substantial Japanese kana in a default-Chinese reply and requests
+one rewrite within the original turn budget. If it still fails, a Chinese notice
+is sent instead of the foreign-language draft. Explicit requests for English or
+Japanese bypass the check; this is a guard, not a guarantee of perfect translation.
 
 - `npm run chat:status`: connection state, missing configuration, daily budget.
 - `npm run chat:stop`: stop the Gateway and new incoming messages. In-flight

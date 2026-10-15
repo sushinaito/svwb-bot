@@ -36,3 +36,14 @@ test('unrelated requests skip lookup and manifest traversal fails closed', async
   assert.equal(result.status, 'unavailable');
   assert.equal(calls, 1);
 });
+
+test('Cloudflare-compatible redirect handling rejects redirects without following them', async () => {
+  let diagnostic;
+  const result = await metaContext('最近最強的龍族牌組有啥', async (url, init) => {
+    if (!['manual', 'follow'].includes(init.redirect)) throw new TypeError('Invalid redirect value');
+    assert.equal(init.redirect, 'manual');
+    return new Response(null, { status: 302, headers: { Location: 'https://other.example/' } });
+  }, d => { diagnostic = d; });
+  assert.equal(result.status, 'unavailable');
+  assert.equal(diagnostic.message, 'Source HTTP 302');
+});

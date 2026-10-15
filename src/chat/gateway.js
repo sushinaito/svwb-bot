@@ -30,6 +30,7 @@ export class DiscordGateway {
       allowedGuildIds: String(this.env.ALLOWED_GUILD_IDS || '').split(',').filter(Boolean),
       messageEditsSupported: true,
       botRoleMentionsSupported: true,
+      chineseOutputGuard: true,
       agentVersion: Number(this.env.CLAUDE_AGENT_VERSION || 1),
     });
     if (path === '/stop') {

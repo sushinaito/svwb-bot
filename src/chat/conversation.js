@@ -1,6 +1,7 @@
 import { claude, discord, json, sendText, messageText } from './api.js';
 import { deckContext } from './decks.js';
 import { metaContext } from './meta.js';
+import { needsChineseRewrite, rewriteEvent } from './language.js';
 import preferredSources from '../../claude/sources.json' with { type: 'json' };
 
 const cap = cents => ({ type: 'limit', max_list_cost: { amount: String(cents), currency: 'USD' } });
@@ -167,15 +168,17 @@ export class Conversation {
       job.since = this.state.cursorTime || null;
       job.phase = 'sending';
       job.sentAt = Date.now();
+      const event = job.repairAttempted ? rewriteEvent() : userEvent(job.input);
+      job.eventText = event.content[0].text;
       await this.save();
-      const result = await claude(this.env, `/sessions/${this.state.sessionId}/events`, 'POST', { events: [userEvent(job.input)] });
+      const result = await claude(this.env, `/sessions/${this.state.sessionId}/events`, 'POST', { events: [event] });
       job.userEventId = result.data[0].id;
       job.phase = 'poll';
       await this.save();
     }
 
     if (job.phase === 'sending') {
-      const expected = userEvent(job.input).content[0].text;
+      const expected = job.eventText || userEvent(job.input).content[0].text;
       const events = await eventsSince(this.env, this.state.sessionId, job.since);
       const sent = events.find(e => e.type === 'user.message' && e.content?.some(b => b.text === expected));
       if (sent) { job.userEventId = sent.id; job.phase = 'poll'; await this.save(); }
@@ -208,10 +211,10 @@ export class Conversation {
       if (!job.userProcessed) continue;
       if (event.type === 'agent.message') {
         const text = messageText(event.content);
-        const remaining = Math.max(0, 12000 - job.outputChars);
+        job.answerParts ||= [];
+        const remaining = Math.max(0, 12000 - job.answerParts.reduce((n, part) => n + part.length, 0));
         if (text && remaining) {
-          await sendText(this.env, job.input.channelId, text.slice(0, remaining), `${job.input.id}:${event.id}`, job.input.id);
-          job.outputChars += Math.min(text.length, remaining);
+          job.answerParts.push(text.slice(0, remaining));
         }
       }
       if (event.type === 'session.error' || event.type === 'session.status_terminated') {
@@ -242,10 +245,29 @@ export class Conversation {
     const job = this.state.current;
     const session = await claude(this.env, `/sessions/${this.state.sessionId}`);
     if (session.status !== 'idle') return;
+    const answer = (job.answerParts || []).join('\n\n');
+    const needsRewrite = needsChineseRewrite(answer, job.input.text);
+    if (needsRewrite && !job.repairAttempted && !job.notice && readCost(session) < job.capCents - 1) {
+      // Reuse this turn's reservation and existing session cap. Never restart
+      // research or grant extra budget for a formatting correction.
+      job.repairAttempted = true;
+      job.answerParts = [];
+      job.userProcessed = false;
+      delete job.userEventId;
+      job.phase = 'send';
+      await this.save();
+      return;
+    }
     // Reported costs are rounded to cents. Add one cent to the difference so
     // reclaiming a reservation does not underestimate the true turn cost.
     const charged = Math.max(0, readCost(session) - job.baseline) + 1;
     await this.budget('/settle', { id: job.input.id, cents: charged });
+    if (answer && !needsRewrite) {
+      await sendText(this.env, job.input.channelId, answer, `${job.input.id}:answer`, job.input.id);
+      job.outputChars = answer.length;
+    } else if (needsRewrite) {
+      job.notice ||= '這次沒能把資料完整整理成繁體中文，我先不貼未翻譯的內容。可以縮小問題再問一次。';
+    }
     if (job.notice || !job.outputChars) {
       await sendText(this.env, job.input.channelId, job.notice || '這次沒有產生文字回覆，可以換個方式再問一次嗎？', `${job.input.id}:done`, job.input.id);
     }
