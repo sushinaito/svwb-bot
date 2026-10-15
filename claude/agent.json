@@ -1,0 +1,15 @@
+{
+  "name": "svwb-discord-chat",
+  "description": "Shadowverse Worlds Beyond assistant for 電競魅魔, replying in natural Taiwanese Traditional Chinese.",
+  "model": "claude-haiku-5-5",
+  "tools": [
+    {
+      "type": "agent_toolset_20260401",
+      "default_config": { "enabled": false },
+      "configs": [
+        { "name": "web_search", "enabled": true, "permission_policy": { "type": "always_allow" } },
+        { "name": "web_fetch", "enabled": true, "permission_policy": { "type": "always_allow" } }
+      ]
+    }
+  ]
+}

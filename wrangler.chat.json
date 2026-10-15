@@ -1,0 +1,29 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "svwb-chat-bot",
+  "main": "src/chat/worker.js",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "durable_objects": {
+    "bindings": [
+      { "name": "GATEWAY", "class_name": "DiscordGateway" },
+      { "name": "CONVERSATIONS", "class_name": "Conversation" },
+      { "name": "BUDGET", "class_name": "DailyBudget" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["DiscordGateway", "Conversation", "DailyBudget"] }
+  ],
+  "vars": {
+    "ALLOWED_GUILD_IDS": "653515220731428865,633265552499933205",
+    "CLAUDE_AGENT_ID": "",
+    "CLAUDE_ENVIRONMENT_ID": "",
+    "CLAUDE_AGENT_VERSION": "1",
+    "DAILY_BUDGET_CENTS": "200",
+    "TURN_BUDGET_CENTS": "20",
+    "BUDGET_MARGIN_CENTS": "10",
+    "DAILY_MESSAGE_LIMIT": "100",
+    "THREAD_IDLE_HOURS": "24"
+  },
+  "observability": { "enabled": true }
+}

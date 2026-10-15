@@ -1,0 +1,217 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { routeMessage, admitMessage } from '../src/chat/routing.js';
+import { jstDay, budgetStatus, reserveTurn, settleTurn, DailyBudget } from '../src/chat/budget.js';
+import { splitMessage, sendText, api } from '../src/chat/api.js';
+import { Conversation, readCost } from '../src/chat/conversation.js';
+import { DiscordGateway } from '../src/chat/gateway.js';
+import worker from '../src/chat/worker.js';
+import { FakeContext, env, input, message } from './helpers.js';
+
+test('only mentions and opted-in threads are routed, with isolated conversation keys', () => {
+  const a = routeMessage(message(), '999', { type: 0 }, {}, env);
+  assert.equal(a.key, '123:456:789');
+  assert.equal(a.text, 'Hello');
+  assert.equal(routeMessage(message({ mentions: [] }), '999', { type: 0 }, {}, env), null);
+  assert.equal(routeMessage(message({ mentions: [] }), '999', { type: 11 }, {}, env), null);
+  const threads = { '456': { expires: Date.now() + 60000 } };
+  const b = routeMessage(message({ content: 'Follow-up', mentions: [] }), '999', { type: 11 }, threads, env);
+  assert.equal(b.key, '123:456');
+  assert.equal(b.text, 'Follow-up');
+});
+
+test('ignores other servers, DMs, bots, webhooks, system events, expired threads', () => {
+  for (const change of [{ guild_id: '555' }, { guild_id: null }, { author: { id: '789', bot: true } }, { webhook_id: 'w' }, { type: 6 }]) {
+    assert.equal(routeMessage(message(change), '999', { type: 11 }, {}, env), null);
+  }
+  assert.equal(routeMessage(message({ mentions: [] }), '999', { type: 11 }, { '456': { expires: 1 } }, env), null);
+});
+
+test('rate limits and durable replay deduplication apply before model calls', () => {
+  const state = {};
+  assert.equal(admitMessage(state, input(), env), 'accepted');
+  assert.equal(admitMessage(state, input(), env), 'duplicate');
+  for (let n = 2; n <= 5; n++) assert.equal(admitMessage(state, input(`m${n}`), env), 'accepted');
+  assert.equal(admitMessage(state, input('m6'), env), 'limited');
+});
+
+test('daily budget reserves across concurrent conversations and fails closed', () => {
+  const state = { days: {}, turns: {} };
+  for (let n = 0; n < 8; n++) assert.equal(reserveTurn(state, env, `m${n}`).approved, true);
+  assert.equal(reserveTurn(state, env, 'm9').approved, false);
+  assert.equal(budgetStatus(state, env).reservedCents, 176);
+  settleTurn(state, 'm1', 3);
+  assert.equal(reserveTurn(state, env, 'm9').approved, true);
+  settleTurn(state, 'm1', 100);
+  assert.equal(budgetStatus(state, env).accountedCents, 3);
+});
+
+test('JST midnight rollover carries in-flight reservations and does not refund unknown outcomes', () => {
+  const before = Date.parse('2026-10-15T14:59:59Z'), after = before + 2000;
+  const state = { days: {}, turns: {} };
+  assert.equal(jstDay(before), '2026-10-15');
+  assert.equal(jstDay(after), '2026-10-16');
+  reserveTurn(state, env, 'm1', before);
+  assert.equal(budgetStatus(state, env, after).reservedCents, 22);
+  settleTurn(state, 'm1', 10, after);
+  assert.equal(state.days['2026-10-15'], 10);
+  assert.equal(state.days['2026-10-16'], 10);
+  assert.equal(reserveTurn(state, env, 'm1', after).approved, false);
+});
+
+test('Discord output is bounded, Unicode-safe and suppresses all mentions', async t => {
+  const text = 'a'.repeat(1899) + '😀' + 'b'.repeat(3000);
+  const pieces = splitMessage(text);
+  assert.equal(pieces.join(''), text);
+  assert.ok(pieces.every(p => p.length <= 1900 && !/[\uD800-\uDBFF]$/.test(p)));
+  const bodies = [];
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    bodies.push(JSON.parse(init.body)); return Response.json({ id: 'reply' });
+  });
+  await sendText(env, '456', text, 'stable-key', 'm1');
+  const first = bodies[0].nonce;
+  await sendText(env, '456', text, 'stable-key', 'm1');
+  assert.equal(bodies[pieces.length].nonce, first);
+  assert.deepEqual(bodies[0].allowed_mentions, { parse: [], replied_user: false });
+  assert.ok(bodies.every(b => b.enforce_nonce));
+});
+
+test('upstream errors do not reveal secret headers, URLs or response bodies', async () => {
+  await assert.rejects(api('https://test.invalid/secret', { headers: { Authorization: 'secret' } }, 'Claude', async () => new Response('secret', { status: 401 })),
+    error => error.message === 'Claude HTTP 401');
+  assert.throws(() => readCost({ usage: {} }), /Missing session usage/);
+});
+
+async function harness(t) {
+  const budgetCtx = new FakeContext();
+  const budget = new DailyBudget(budgetCtx, env);
+  await budgetCtx.ready;
+  const localEnv = { ...env, BUDGET: { getByName: () => ({ fetch: (url, init) => budget.fetch(new Request(url, init)) }) } };
+  const ctx = new FakeContext();
+  const conversation = new Conversation(ctx, localEnv);
+  await ctx.ready;
+  const calls = [], replies = [], events = [];
+  let sequence = 0, usage = 0, autoAnswer = true;
+  const stamp = () => `2026-10-15T05:00:${String(++sequence).padStart(2, '0')}.000Z`;
+  t.mock.method(globalThis, 'fetch', async (raw, init = {}) => {
+    const url = new URL(raw), body = init.body ? JSON.parse(init.body) : undefined;
+    calls.push({ path: url.pathname, method: init.method, body });
+    if (url.hostname === 'discord.com') {
+      if (url.pathname.endsWith('/messages')) replies.push(body.content);
+      return Response.json({ id: `reply_${replies.length}` });
+    }
+    if (url.pathname === '/v1/sessions' && init.method === 'POST') {
+      events.push({ id: 'initial-idle', type: 'session.status_idle', stop_reason: { type: 'end_turn' }, processed_at: stamp() });
+      return Response.json({ id: 'sesn_test' });
+    }
+    if (url.pathname.endsWith('/events') && init.method === 'POST') {
+      const event = { ...body.events[0], id: `user_${sequence}`, processed_at: stamp() };
+      events.push(event);
+      if (autoAnswer && event.type === 'user.message') {
+        events.push({ id: `reply_${sequence}`, type: 'agent.message', processed_at: stamp(), content: [{ type: 'text', text: `Answer ${sequence}` }] });
+        events.push({ id: `idle_${sequence}`, type: 'session.status_idle', processed_at: stamp(), stop_reason: { type: 'end_turn' } });
+        usage += 2;
+      }
+      return Response.json({ data: [event] });
+    }
+    if (url.pathname.endsWith('/events')) {
+      const since = url.searchParams.get('created_at[gte]');
+      return Response.json({ data: events.filter(e => !since || e.processed_at >= since), next_page: null });
+    }
+    if (init.method === 'DELETE') return new Response(null, { status: 204 });
+    assert.ok(['GET', 'POST'].includes(init.method), 'Session updates must use POST');
+    return Response.json({ id: 'sesn_test', status: 'idle', usage: { list_cost: { currency: 'USD', amount: String(usage) } } });
+  });
+  const enqueue = data => conversation.fetch(new Request('https://conversation/message', { method: 'POST', body: JSON.stringify(data) }));
+  return { conversation, ctx, budget, calls, replies, events, enqueue, setAutoAnswer: value => { autoAnswer = value; } };
+}
+
+test('two conversational turns reuse the pinned agent session and never replay old answers', async t => {
+  const h = await harness(t);
+  await h.enqueue(input('m1'));
+  await h.conversation.alarm();
+  assert.equal(h.replies.length, 1);
+  assert.equal(h.conversation.state.current, null);
+  await h.enqueue(input('m2', { text: 'Follow up' }));
+  await h.conversation.alarm();
+  assert.equal(h.replies.length, 2);
+  const creates = h.calls.filter(c => c.path === '/v1/sessions' && c.method === 'POST');
+  assert.equal(creates.length, 1);
+  assert.deepEqual(creates[0].body.agent, { type: 'agent', id: 'agent_test', version: 1 });
+  assert.equal(creates[0].body.budget.max_list_cost.amount, '20');
+  assert.ok(h.calls.some(c => c.path === '/v1/sessions/sesn_test' && c.method === 'POST' && c.body.budget.max_list_cost.amount === '22'));
+  assert.equal(budgetStatus(h.budget.state, env).accountedCents, 6);
+  assert.equal(budgetStatus(h.budget.state, env).reservedCents, 0);
+  await h.enqueue(input('m2'));
+  assert.equal(h.conversation.state.queue.length, 0);
+});
+
+test('initial idle and prior turn history cannot finish or duplicate a pending reply', async t => {
+  const h = await harness(t);
+  await h.enqueue(input('m1')); await h.conversation.alarm();
+  h.setAutoAnswer(false);
+  await h.enqueue(input('m2')); await h.conversation.alarm();
+  assert.equal(h.conversation.state.current.phase, 'poll');
+  await h.conversation.alarm();
+  assert.equal(h.replies.length, 1);
+  assert.equal(h.conversation.state.current.phase, 'poll');
+});
+
+test('uncertain send recovers from persisted event history without submitting twice', async t => {
+  const h = await harness(t);
+  await h.enqueue(input('m1')); h.setAutoAnswer(false); await h.conversation.alarm();
+  const job = h.conversation.state.current;
+  job.phase = 'sending'; delete job.userEventId;
+  const before = h.calls.filter(c => c.path.endsWith('/events') && c.method === 'POST').length;
+  await h.conversation.alarm();
+  assert.equal(h.conversation.state.current.phase, 'poll');
+  assert.equal(h.calls.filter(c => c.path.endsWith('/events') && c.method === 'POST').length, before);
+});
+
+test('budget denial makes no Claude generation request', async t => {
+  const h = await harness(t);
+  h.budget.state.days[jstDay()] = 200;
+  await h.enqueue(input()); await h.conversation.alarm();
+  assert.equal(h.calls.filter(c => c.path.startsWith('/v1/sessions')).length, 0);
+  assert.match(h.replies[0], /AI 預算/);
+});
+
+test('only conversation starter can clear shared thread history', async t => {
+  const h = await harness(t);
+  await h.enqueue(input('m1', { thread: true })); await h.conversation.alarm();
+  await h.enqueue(input('m2', { thread: true, command: 'reset', authorId: 'other' }));
+  assert.match(h.replies.at(-1), /只有開啟/);
+  assert.equal(h.conversation.state.sessionId, 'sesn_test');
+  await h.enqueue(input('m3', { thread: true, command: 'reset' })); await h.conversation.alarm();
+  assert.equal(h.conversation.state.sessionId, undefined);
+  assert.ok(h.calls.some(c => c.method === 'DELETE'));
+});
+
+test('Gateway heartbeat/resume uses the persisted sequence', async () => {
+  const ctx = new FakeContext();
+  const gateway = new DiscordGateway(ctx, env); await ctx.ready;
+  const sent = [];
+  gateway.socket = { send: raw => sent.push(JSON.parse(raw)), close() {} };
+  gateway.state.resume = { id: 'gateway_session', url: 'wss://gateway.discord.gg', seq: 42 };
+  gateway.latestSequence = 42;
+  gateway.acknowledged = true;
+  await gateway.packet({ op: 10, d: { heartbeat_interval: 45000 } });
+  assert.equal(sent[0].op, 6);
+  assert.equal(sent[0].d.seq, 42);
+  gateway.heartbeat(); assert.deepEqual(sent.at(-1), { op: 1, d: 42 });
+  gateway.heartbeat(); assert.equal(gateway.socket, null);
+});
+
+test('public admin endpoints cannot start the bot without the secret', async () => {
+  const response = await worker.fetch(new Request('https://chat/admin/start', { method: 'POST' }), { CHAT_ADMIN_TOKEN: 'secret' });
+  assert.equal(response.status, 401);
+});
+
+test('agent spec pins Haiku 5.5 and only enables web tools', async () => {
+  const spec = JSON.parse(await readFile(new URL('../claude/agent.json', import.meta.url), 'utf8'));
+  assert.equal(spec.model, 'claude-haiku-5-5');
+  assert.equal(spec.tools[0].default_config.enabled, false);
+  assert.deepEqual(spec.tools[0].configs.map(c => c.name), ['web_search', 'web_fetch']);
+  assert.equal(spec.multiagent, undefined);
+});

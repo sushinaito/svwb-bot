@@ -1,5 +1,10 @@
 Shadowverse WB Deck Bot (Cloudflare Workers)
 
+Natural mention/thread chat with Claude Managed Agents is implemented as a separate
+companion Worker. See [CHAT_SETUP.md](CHAT_SETUP.md) for behavior, deployment, and
+the Haiku 5.5 / $2-per-day configuration. Use `wrangler.chat.local.json` for that
+service; the instructions below describe the older slash-command Worker only.
+
 This Worker exposes a Discord Interactions endpoint that serves a `/deck` slash command.
 Users provide a 4-letter deck code and the bot replies with the deck image from shadowverse-wb.com.
 

@@ -4,7 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "register:guild": "node scripts/register-commands.js"
+    "register:guild": "node scripts/register-commands.js",
+    "test": "node --test test/*.test.js",
+    "chat:setup": "node --env-file=.env.txt scripts/setup-chat.js",
+    "chat:status": "node scripts/chat-admin.js status",
+    "chat:start": "node scripts/chat-admin.js start",
+    "chat:stop": "node scripts/chat-admin.js stop",
+    "chat:deploy": "wrangler deploy --config wrangler.chat.local.json"
   }
 }
 
