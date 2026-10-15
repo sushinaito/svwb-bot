@@ -101,6 +101,28 @@ include source links. Necessary proper names may remain in their original langua
 
 ## Operations
 
+Conversation context is isolated by guild/channel/user in normal channels, where
+each message needs a bot mention. An opted-in thread shares its conversation with
+participants and accepts follow-ups without mentions for 24 hours since activity.
+Only messages accepted after opt-in enter context; the bot does not backfill the
+channel's history or read unrelated untagged chatter into its normal conversations.
+
+Before the next message, the bot summarizes and starts a successor session when
+the latest model-request context plus incoming data approaches 80,000 tokens, or
+the previous accepted turn was more than 30 minutes ago. It includes cache reads,
+cache writes and the last output; cumulative session token usage is not a context
+size. Incoming UTF-8 byte length is a conservative estimate. An old session with
+no local counter bootstraps from the latest model request event. The configurable
+CONTEXT_COMPACT_TOKENS value is clamped to 50K–90K (default 80K).
+
+Managed Agents exposes no configurable compaction trigger in its public agent or
+session schema, so this is application-level summary rollover between turns. It
+cannot prevent a large tool result within a turn from crossing 100K. Summaries may
+lose detail. Summary and reply share one reservation, and the successor session's
+cap is reduced by summary spend; both sessions are accounted with rounding guards.
+No model calls run merely because the conversation is idle. Old idle sessions
+remain available as original records; reset deletes them and the saved summary.
+
 Bot user mentions and its own Discord-managed bot role both trigger chat and
 `reset`. Other roles do not. If `reset` succeeds the bot explicitly confirms
 the history was cleared; a missed reset does not change the pinned agent version.
@@ -136,6 +158,10 @@ Japanese bypass the check; this is a guard, not a guarantee of perfect translati
 - `node --env-file=.env.txt scripts/smoke-meta.js [agent-version]`: checks live
   Dragon data and a Chinese answer using the supplied data, with a 20-cent session
   cap. Deletes the test session; its usage is outside the bot ledger.
+- `node --env-file=.env.txt scripts/smoke-compaction.js`: runs the real conversation
+  state machine with disposable Claude sessions and local-only Discord delivery,
+  forces the context boundary without buying filler tokens, and verifies that a
+  budget and class preference survive summary rollover. Deletes test sessions.
 
 Gateway reconnects use persisted Discord session/sequence state. Incoming messages
 are durably queued and deduplicated. Each conversation serializes turns and polls

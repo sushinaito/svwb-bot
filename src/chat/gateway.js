@@ -31,6 +31,7 @@ export class DiscordGateway {
       messageEditsSupported: true,
       botRoleMentionsSupported: true,
       chineseOutputGuard: true,
+      contextCompaction: { thresholdTokens: Number(this.env.CONTEXT_COMPACT_TOKENS || 80000), idleMinutes: 30 },
       agentVersion: Number(this.env.CLAUDE_AGENT_VERSION || 1),
     });
     if (path === '/stop') {

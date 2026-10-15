@@ -23,7 +23,8 @@
     "TURN_BUDGET_CENTS": "20",
     "BUDGET_MARGIN_CENTS": "10",
     "DAILY_MESSAGE_LIMIT": "100",
-    "THREAD_IDLE_HOURS": "24"
+    "THREAD_IDLE_HOURS": "24",
+    "CONTEXT_COMPACT_TOKENS": "80000"
   },
   "observability": { "enabled": true }
 }

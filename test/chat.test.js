@@ -98,7 +98,7 @@ async function harness(t, answers = []) {
   const conversation = new Conversation(ctx, localEnv);
   await ctx.ready;
   const calls = [], replies = [], events = [];
-  let sequence = 0, usage = 0, autoAnswer = true;
+  let sequence = 0, usage = 0, autoAnswer = true, sessionCount = 0;
   const stamp = () => `2026-10-15T05:00:${String(++sequence).padStart(2, '0')}.000Z`;
   t.mock.method(globalThis, 'fetch', async (raw, init = {}) => {
     const url = new URL(raw), body = init.body ? JSON.parse(init.body) : undefined;
@@ -108,8 +108,10 @@ async function harness(t, answers = []) {
       return Response.json({ id: `reply_${replies.length}` });
     }
     if (url.pathname === '/v1/sessions' && init.method === 'POST') {
+      sessionCount++;
+      if (sessionCount > 1) usage = 0;
       events.push({ id: 'initial-idle', type: 'session.status_idle', stop_reason: { type: 'end_turn' }, processed_at: stamp() });
-      return Response.json({ id: 'sesn_test' });
+      return Response.json({ id: sessionCount === 1 ? 'sesn_test' : `sesn_test_${sessionCount}` });
     }
     if (url.pathname.endsWith('/events') && init.method === 'POST') {
       const event = { ...body.events[0], id: `user_${sequence}`, processed_at: stamp() };
@@ -130,7 +132,7 @@ async function harness(t, answers = []) {
     return Response.json({ id: 'sesn_test', status: 'idle', usage: { list_cost: { currency: 'USD', amount: String(usage) } } });
   });
   const enqueue = data => conversation.fetch(new Request('https://conversation/message', { method: 'POST', body: JSON.stringify(data) }));
-  return { conversation, ctx, budget, calls, replies, events, enqueue, setAutoAnswer: value => { autoAnswer = value; } };
+  return { conversation, ctx, localEnv, budget, calls, replies, events, enqueue, setAutoAnswer: value => { autoAnswer = value; } };
 }
 
 test('two conversational turns reuse the pinned agent session and never replay old answers', async t => {
@@ -165,6 +167,34 @@ test('foreign search prose is withheld and rewritten once within the original bu
   assert.equal(h.conversation.state.current, null);
   assert.equal(h.calls.filter(c => c.body?.budget).length, 1, 'Repair cannot increase the session cap');
   assert.equal(budgetStatus(h.budget.state, env).accountedCents, 5);
+});
+
+for (const trigger of ['tokens', 'idle']) test(`automatic summary rollover preserves context and one reservation (${trigger})`, async t => {
+  const h = await harness(t, ['收到，牌組是 y8hf，預算 3000。', '使用者的牌組 y8hf，合成預算 3000，不換職業。', '你的合成預算是 3000。']);
+  await h.enqueue(input('before')); await h.conversation.alarm();
+  if (trigger === 'tokens') h.conversation.state.contextTokens = 81000;
+  else { h.conversation.state.contextTokens = 100; h.conversation.state.lastTurnAt = Date.now() - 31 * 60000; }
+  await h.enqueue(input('after', { text: '還記得我的預算嗎？' })); await h.conversation.alarm();
+  assert.equal(h.conversation.state.current.phase, 'rotate');
+  assert.equal(h.replies.length, 1, 'Summary is internal, not a reply');
+  assert.equal(h.conversation.state.sessionId, 'sesn_test', 'Old session remains until summary is saved');
+  h.conversation = new Conversation(h.ctx, h.localEnv); await h.ctx.ready;
+  h.enqueue = data => h.conversation.fetch(new Request('https://conversation/message', { method: 'POST', body: JSON.stringify(data) }));
+  await h.conversation.alarm();
+  assert.equal(h.conversation.state.current, null);
+  assert.equal(h.conversation.state.sessionId, 'sesn_test_2');
+  assert.deepEqual(h.conversation.state.retiredSessions, ['sesn_test']);
+  assert.deepEqual(h.replies, ['收到，牌組是 y8hf，預算 3000。', '你的合成預算是 3000。']);
+  const lastUser = h.calls.filter(c => c.path.endsWith('/events') && c.method === 'POST').at(-1).body.events[0].content[0].text;
+  assert.match(lastUser, /previous_conversation_summary/);
+  assert.match(lastUser, /y8hf/);
+  const create = h.calls.filter(c => c.path === '/v1/sessions').at(-1);
+  assert.equal(create.body.budget.max_list_cost.amount, '17');
+  assert.equal(budgetStatus(h.budget.state, env).accountedCents, 9, 'Both sessions and rounding guards are charged');
+  assert.equal(budgetStatus(h.budget.state, env).reservedCents, 0);
+  await h.enqueue(input('clear', { command: 'reset' })); await h.conversation.alarm();
+  assert.deepEqual(h.calls.filter(c => c.method === 'DELETE').map(c => c.path).sort(), ['/v1/sessions/sesn_test', '/v1/sessions/sesn_test_2']);
+  assert.equal(h.conversation.state.summary, undefined);
 });
 
 test('a failed language rewrite stops after one retry and never sends the foreign draft', async t => {
