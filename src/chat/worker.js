@@ -9,11 +9,18 @@ import { publishDeckCode } from './decks.js';
 export { DiscordGateway } from './gateway.js';
 export { Conversation } from './conversation.js';
 export { DailyBudget } from './budget.js';
+export { DeckLibrary } from './deck-library.js';
 
 export default {
   async fetch(request, env) {
     const path = new URL(request.url).pathname;
     if (request.method === 'GET' && path === '/') return new Response('SVWB conversational bot');
+    if (path === '/internal/deck-library') {
+      if (!env.DECK_SYNC_TOKEN || request.headers.get('X-SVWB-Deck-Sync') !== env.DECK_SYNC_TOKEN) return new Response('Unauthorized',{status:401});
+      if (!['GET','PUT'].includes(request.method))return new Response('Method not allowed',{status:405});
+      if (!env.DECK_LIBRARY)return new Response('Library unavailable',{status:503});
+      return env.DECK_LIBRARY.getByName('main').fetch(new Request('https://library/snapshot',request));
+    }
     if (!['/admin/status', '/admin/start', '/admin/stop', '/admin/source-health', '/admin/budget-reset'].includes(path)) return new Response('Not found', { status: 404 });
     if (!env.CHAT_ADMIN_TOKEN || request.headers.get('Authorization') !== `Bearer ${env.CHAT_ADMIN_TOKEN}`) {
       return new Response('Unauthorized', { status: 401 });

@@ -21,7 +21,7 @@ for (let attempt = 0; attempt < 16; attempt++) {
   previous = serialized;
   if (check.enabled && check.connected && check.agentVersion === Number(config.vars.CLAUDE_AGENT_VERSION) &&
       check.gatewayFunVersion === FUN_VERSION && check.conversationFunVersion === FUN_VERSION &&
-      check.cardDatabase?.available && check.progressReplyVersion === 2 && check.deckDatabase?.available && check.deckCacheVersion === 1 &&
+      check.cardDatabase?.available && check.progressReplyVersion === 2 && check.deckDatabase?.available && check.deckCacheVersion === 2 && check.deckDatabase.storage === 'cloud_durable_object' &&
       check.catalogBatching && check.rendererAuthenticated && !check.missingTools.length && !check.error) {
     console.log('Verified: both research and natural-chat actions are live, with authenticated card rendering.');
     process.exit(0);

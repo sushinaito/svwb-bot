@@ -6,12 +6,16 @@ export const jstDay = (now = Date.now()) => new Date(now + 9 * 3600000).toISOStr
 // their reservation. Carry open reservations across JST midnight conservatively.
 export function budgetStatus(state, env, now = Date.now()) {
   const day = jstDay(now);
-  const reserved = Object.values(state.turns).filter(t => t.status === 'open').reduce((n, t) => n + t.reserved, 0);
+  // Reserve the native scheduled agent's bounded daily run conservatively,
+  // even on days when it uses less than its cap or never starts.
+  const maintenanceCents = Math.max(0, Number(env.MAINTENANCE_BUDGET_CENTS) || 0);
+  const reserved = maintenanceCents + Object.values(state.turns).filter(t => t.status === 'open').reduce((n, t) => n + t.reserved, 0);
   const spent = state.days[day] || 0;
   const cap = Number(env.DAILY_BUDGET_CENTS || 200);
   const margin = Number(env.BUDGET_MARGIN_CENTS || 10);
   return { day, timezone: 'Asia/Tokyo', capCents: cap, accountedCents: spent, reservedCents: reserved,
-    remainingCents: Math.max(0, cap - margin - spent - reserved), marginCents: margin };
+    remainingCents: Math.max(0, cap - margin - spent - reserved), marginCents: margin,
+    ...(maintenanceCents ? {maintenanceCents} : {}) };
 }
 
 export function reserveTurn(state, env, id, now = Date.now()) {

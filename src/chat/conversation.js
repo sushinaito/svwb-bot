@@ -4,6 +4,7 @@ import { metaContext } from './meta.js';
 import { cardContext } from './cards.js';
 import { cardCache } from './card-cache.js';
 import { deckCache, simpleDeckRequest, cachedDeckAnswer } from './deck-cache.js';
+import { searchDeckLibrary, deckLibraryStatus } from './deck-library.js';
 import { packMetadata } from './packs.js';
 import { localizeReplyLabels } from './labels.js';
 import { guideContext } from './guides.js';
@@ -33,7 +34,7 @@ export const userEvent = input => ({ type: 'user.message', content: [{ type: 'te
   message: input.text,
   terminology: relevantTerminology(input.text),
   card_database: cardCache.metadata,
-  deck_database: deckCache.metadata,
+  deck_database: input.deckDatabase || deckCache.metadata,
   pack_database: packMetadata,
   ...(input.lastCompletedAnswer ? { previous_assistant_answer: input.lastCompletedAnswer } : {}),
   ...(input.replyContext ? { replying_to_bot_message: input.replyContext } : {}),
@@ -154,7 +155,7 @@ export class Conversation {
       return json({ funVersion: FUN_VERSION, tools: [...agentSpec.tools, ...FUN_TOOLS].map(t => t.name || t.type),
         rendererConfigured, rendererAuthenticated, catalogBatching: true, deckDeliveryVersion: 2, naturalResponseStyle: true,
         responseEditing: true, progressReplyVersion: 2, cardDatabase: cardCache.metadata, packDatabase: packMetadata,
-        deckDatabase: deckCache.metadata, deckCacheVersion: 1,
+        deckDatabase: await deckLibraryStatus(this.env), deckCacheVersion: 2,
         terminologyCount: TERMINOLOGY_COUNT, terminologyStorage: 'bundled_json' });
     }
     const input = await request.json();
@@ -240,7 +241,7 @@ export class Conversation {
       // reservation. Extra conditions and quoted/image context stay with AI.
       const filters = !job.input.images?.length && !job.input.replyContext && !job.input.referencedContext
         ? simpleDeckRequest(job.input.text) : null;
-      const cached = filters ? deckCache.search({ ...filters, limit: 1 }) : null;
+      const cached = filters ? await searchDeckLibrary(this.env,{ ...filters, limit: 1 }) : null;
       if (cached?.decks?.length) {
         job.completedAnswer = cachedDeckAnswer(cached);
         job.input.deliveryDecks = collectDeliveryDecks(cached);
@@ -265,6 +266,7 @@ export class Conversation {
     }
     if (job.phase === 'prepare') {
       if (this.state.lastCompletedAnswer) job.input.lastCompletedAnswer = this.state.lastCompletedAnswer;
+      job.input.deckDatabase = await deckLibraryStatus(this.env);
       if (!job.input.decks) job.input.decks = await deckContext(job.input.text);
       if (job.input.meta === undefined) job.input.meta = await metaContext(job.input.text, fetch, undefined, job.input.replyContext?.text || job.input.referencedContext?.text);
       if (job.input.guides === undefined) job.input.guides = await guideContext(job.input.text, job.input.meta);
@@ -504,7 +506,7 @@ export class Conversation {
           const result = job.toolResults[event.id].allowed
             ? event.name === 'report_svwb_progress' ? await this.progress(event.input?.message) : isFunTool(event.name)
               ? await executeFunTool(this.env, event, job, this.state, () => this.save())
-              : await executeResearchTool(event.name, event.input)
+              : await executeResearchTool(event.name, event.input, fetch, this.env)
             : { status: 'unavailable', message: '本輪直接查詢次數已用完，請依已有資料作答並標明缺口。' };
           if (event.name === 'read_svwb_source' && result.status === 'ok') job.readSource = true;
           if (event.name === 'query_svwb_data' && ['terminology', 'cards', 'catalog', 'packs', 'deck_library'].includes(event.input?.resource) && result.status === 'ok') job.readSource = true;
@@ -668,7 +670,7 @@ export class Conversation {
         .filter(e=>isLocalResearch(e.name,e.input) ? localRemaining-->0 : networkRemaining-->0);
       const recovered = [];
       for (const event of pending) {
-        const result = await executeResearchTool(event.name, event.input);
+        const result = await executeResearchTool(event.name, event.input, fetch, this.env);
         recovered.push(researchResultEvent(event.id, result));
         const delivery = collectDeliveryDecks(result);
         if (delivery.length) job.input.deliveryDecks = [...new Map([...(job.input.deliveryDecks || []), ...delivery].map(d => [d.deckUrl, d])).values()].slice(-24);

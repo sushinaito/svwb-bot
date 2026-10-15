@@ -3,6 +3,7 @@ import {createHash} from 'node:crypto';
 import {readJson} from '../src/chat/meta.js';
 import {lookupDeckHash,cardSignature} from '../src/chat/decks.js';
 import {stripActive,textOf} from '../src/chat/guides.js';
+import {deckRevisionContent} from '../src/chat/deck-library-data.js';
 
 const path='data/deck-library.json';
 await mkdir('data',{recursive:true});
@@ -102,12 +103,10 @@ if(!process.argv.includes('--meta-only')){
   await persist();
  }
 }
-// Check dates change daily; only changes to the usable library require a deploy.
-db.revision=hash(JSON.stringify([...bySignature.values()].sort((a,b)=>a.id.localeCompare(b.id)).map(d=>({
- id:d.id,deckUrl:d.deckUrl,classId:d.classId,format:d.format,cards:d.cards,archetype:d.archetype,
- sources:d.sources.map(({checkedAt,...source})=>source).sort((a,b)=>a.url.localeCompare(b.url)),
-}))));
+// Check dates change daily; the revision tracks usable library content only.
+db.revision=hash(deckRevisionContent([...bySignature.values()]));
 if(db.revision!==previousRevision)db.syncedAt=now;
+db.syncStatus=errors.length?'partial':'ok';
 await persist();
-console.log(JSON.stringify({saved:path,decks:db.decks.length,added:db.decks.length-before,changed:db.revision!==previousRevision,revision:db.revision,requests,unchanged,errors:errors.length,coverage:db.coverage}));
-if(errors.length)process.exitCode=1;
+console.log(JSON.stringify({saved:path,status:db.syncStatus,decks:db.decks.length,added:db.decks.length-before,changed:db.revision!==previousRevision,revision:db.revision,requests,unchanged,errors:errors.length,...(errors.length?{sourceErrors:errors}:{}),coverage:db.coverage}));
+if(errors.length&&!process.argv.includes('--allow-partial'))process.exitCode=1;

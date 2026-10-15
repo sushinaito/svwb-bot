@@ -10,11 +10,13 @@
     "bindings": [
       { "name": "GATEWAY", "class_name": "DiscordGateway" },
       { "name": "CONVERSATIONS", "class_name": "Conversation" },
-      { "name": "BUDGET", "class_name": "DailyBudget" }
+      { "name": "BUDGET", "class_name": "DailyBudget" },
+      { "name": "DECK_LIBRARY", "class_name": "DeckLibrary" }
     ]
   },
   "migrations": [
-    { "tag": "v1", "new_sqlite_classes": ["DiscordGateway", "Conversation", "DailyBudget"] }
+    { "tag": "v1", "new_sqlite_classes": ["DiscordGateway", "Conversation", "DailyBudget"] },
+    { "tag": "v2-deck-library", "new_sqlite_classes": ["DeckLibrary"] }
   ],
   "vars": {
     "ALLOWED_GUILD_IDS": "653515220731428865,633265552499933205",
@@ -25,6 +27,7 @@
     "TURN_BUDGET_CENTS": "20",
     "ANSWER_RESERVE_CENTS": "4",
     "BUDGET_MARGIN_CENTS": "10",
+    "MAINTENANCE_BUDGET_CENTS": "5",
     "DAILY_MESSAGE_LIMIT": "100",
     "THREAD_IDLE_HOURS": "24",
     "CONTEXT_COMPACT_TOKENS": "80000"

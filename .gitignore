@@ -15,3 +15,5 @@ data/official-cards-cht.json
 data/official-cards-cht.json.tmp
 data/deck-library.json
 data/deck-library.json.tmp
+.deck-sync-setup.json
+.deck-sync-secrets.json

@@ -22,7 +22,7 @@ export function createDeckCache(data,cards=cardCache){
   new Set(data.decks.map(d=>d.id)).size===data.decks.length&&data.decks.every(d=>{
    try{const u=new URL(d.deckUrl);return u.origin==='https://shadowverse-wb.com'&&/^\/(?:cht|ja|en)\/deck\/detail\/$/.test(u.pathname)&&
     /^[1-3]\.[0-7](?:\.[A-Za-z0-9_-]{4,8}){40}$/.test(u.searchParams.get('hash')||'')&&
-    Number(u.searchParams.get('hash').split('.')[1])===d.classId&&cardSignature(d.cards)&&d.sources?.length&&
+    Number(u.searchParams.get('hash').split('.')[1])===d.classId&&({1:'rotation',2:'unlimited',3:'infinity'}[u.searchParams.get('hash')[0]])===d.format&&cardSignature(d.cards)&&d.sources?.length&&
     d.sources.every(s=>{const link=new URL(s.url);return link.protocol==='https:'&&!link.username&&!link.password;});}catch{return false;}
   });
  const metadata=valid?{available:true,count:data.decks.length,syncedAt:data.syncedAt,revision:data.revision,storage:'private_worker_bundle',coverage:data.coverage}:{available:false};

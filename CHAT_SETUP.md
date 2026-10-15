@@ -356,9 +356,37 @@ References:
   Validate with `node --conditions=card-cache --conditions=deck-cache scripts/check-deck-cache.js`
   and `node --conditions=card-cache --conditions=deck-cache scripts/smoke-deck-cache.js`.
   The smoke test captures Discord sends and fails on any AI/research HTTP request.
-  Daily Codex heartbeat: 09:00 Asia/Tokyo, on this computer. It runs the sync,
-  compares local and deployed revisions, and deploys only a changed library after
-  validation. Codex and the computer must be running. Daily sync never resets quota.
+  Production queries use the shared `DeckLibrary` Durable Object. The bundle
+  seeds an empty database once; subsequent updates are atomic cloud data writes
+  and take effect without deploying or restarting the Discord gateway. Requests
+  retain the bundled snapshot as an explicitly marked fallback if cloud storage
+  is temporarily unavailable. Content digest, complete-deck validation, revision
+  comparison and monotonic source/build preservation prevent partial or stale
+  syncs from replacing the last usable library. A single source outage retains
+  that source's old builds while validated additions from available sources are
+  saved with `syncStatus=partial` and explicit `sourceErrors`. It is never silently
+  reported as a complete refresh. Initial cloud testing found GameWith HTTP 403;
+  no access-control workaround is used. Other public sources continue updating.
+  Daily scheduling is native Claude Managed Agents, at 09:00 Asia/Tokyo. No local
+  Codex automation is required; the earlier local heartbeat was removed. The
+  dedicated Haiku 5.5 maintenance agent runs the bundled deterministic updater
+  once in its cloud sandbox. A vault credential can authenticate only to the
+  bot's deck-library endpoint; it cannot stop/start the gateway, reset quota,
+  deploy Workers, or send Discord messages. Only bash/read tools are enabled
+  (read is required by the platform to mount the program file). No personal files
+  or repositories are mounted. A 5-cent per-run cap is conservatively reserved
+  within the existing $2 daily chat allowance via `MAINTENANCE_BUDGET_CENTS`.
+  Setup: bundle `scripts/cloud-deck-sync.js` to `.wrangler/cloud-deck-sync.mjs`
+  with esbuild (`--bundle --platform=node --format=esm`); run
+  `node --env-file=.env.txt scripts/setup-cloud-deck-sync.js`, upload the generated
+  scoped Worker secret with `wrangler secret bulk .deck-sync-secrets.json --config wrangler.chat.local.json`,
+  and deploy the database binding once. Run
+  `node --env-file=.env.txt scripts/cloud-deck-admin.js run` and inspect `status`.
+  Only after a successful cloud run, call setup with `--enable` to add the daily
+  schedule. The platform may jitter runs by several minutes. Setup IDs, secrets
+  and built artifacts are Git-ignored. Cloud and setup operations never reset quota.
+  References: https://platform.claude.com/docs/en/managed-agents/scheduled-deployments
+  and https://platform.claude.com/docs/en/managed-agents/vaults .
 - https://platform.claude.com/docs/en/managed-agents/events-and-streaming
 - Official game vocabulary lives in `claude/terminology.json`, bundled into the
   worker. Each entry has Traditional Chinese, English and Japanese names plus
