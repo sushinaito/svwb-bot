@@ -84,7 +84,12 @@ test('deck images use Discord multipart attachments with stable nonces and no UR
   const bodies = [];
   t.mock.method(globalThis, 'fetch', async (url, options) => {
     assert.match(url, /^https:\/\/discord.com\/api\/v10\/channels\/456\/messages$/);
-    assert.ok(options.body instanceof FormData);
+    if (!(options.body instanceof FormData)) {
+      const payload = JSON.parse(options.body);
+      assert.match(payload.content, /牌組圖暫時無法載入/);
+      assert.deepEqual(payload.attachments, []);
+      bodies.push(payload); return Response.json({ id: 'fallback' });
+    }
     assert.equal(new Headers(options.headers).has('Content-Type'), false);
     const payload = JSON.parse(options.body.get('payload_json'));
     assert.equal(payload.flags, 4);
@@ -98,5 +103,5 @@ test('deck images use Discord multipart attachments with stable nonces and no UR
   await sendDeckPictures(env, input(), deckUrl, async () => pngResponse());
   assert.equal(bodies[0].nonce, bodies[1].nonce);
   await sendDeckPictures(env, input(), deckUrl, async () => new Response('unavailable', { status: 503 }));
-  assert.equal(bodies.length, 2, 'Failed image download must not send an empty attachment');
+  assert.equal(bodies.length, 3, 'Failed image download still sends the usable official link without empty files');
 });

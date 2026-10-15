@@ -1,4 +1,5 @@
 import { discord, messageNonce } from './api.js';
+import { publishDeckCode } from './decks.js';
 
 export function deckImageUrl(deckUrl) {
   try {
@@ -10,16 +11,30 @@ export function deckImageUrl(deckUrl) {
   } catch { return null; }
 }
 
+export function collectDeliveryDecks(result) {
+  if (result?.status !== 'ok') return [];
+  return (result.archetypes || []).flatMap(a => (a.decks || []).filter(d => deckImageUrl(d.deckUrl)).map(d => ({
+    deckUrl: d.deckUrl, label: `${a.className || result.className || '牌組'}・${a.name}`,
+    ...(d.cards ? { cards: d.cards.map(c => ({ id: c.id, quantity: c.quantity })) } : {}),
+  }))).slice(0, 16);
+}
+
 export function deckPictures(input, answer) {
   const pictures = new Map();
-  const add = (url, label) => {
+  const add = (url, label, cards) => {
     const imageUrl = deckImageUrl(url);
-    if (imageUrl && !pictures.has(imageUrl)) pictures.set(imageUrl, { imageUrl, deckUrl: url, label });
+    if (imageUrl && !pictures.has(imageUrl)) {
+      const localized = new URL(url); localized.pathname = '/cht/deck/detail/';
+      pictures.set(imageUrl, { imageUrl, deckUrl: localized.href, label, cards });
+    }
   };
-  for (const archetype of input.meta?.archetypes || []) for (const deck of archetype.decks || []) {
-    if (answer.includes(archetype.name) || answer.includes(deck.deckUrl)) add(deck.deckUrl, `${archetype.className || input.meta.className || '牌組'}・${archetype.name}`);
+  const candidates = [...(input.deliveryDecks || []), ...collectDeliveryDecks(input.meta)];
+  // Only an explicitly linked build is selected, never every archetype fetched
+  // during research or a similarly named build mentioned in a comparison.
+  for (const match of answer.matchAll(/https:\/\/shadowverse-wb\.com\/[^\s<>\])]+/g)) {
+    const candidate = candidates.find(d => deckImageUrl(d.deckUrl) === deckImageUrl(match[0]));
+    add(match[0], candidate?.label || '牌組', candidate?.cards);
   }
-  for (const match of answer.matchAll(/https:\/\/shadowverse-wb\.com\/[^\s<>\])]+/g)) add(match[0], '牌組');
   return [...pictures.values()].slice(0, 2);
 }
 
@@ -48,17 +63,21 @@ export async function fetchDeckPicture(picture, fetcher = fetch) {
 export async function sendDeckPictures(env, input, answer, fetcher = fetch) {
   const pictures = deckPictures(input, answer);
   if (!pictures.length) return;
-  const results = await Promise.allSettled(pictures.map(async picture => ({ ...picture, blob: await fetchDeckPicture(picture, fetcher) })));
-  const ready = results.filter(r => r.status === 'fulfilled').map(r => r.value);
-  if (!ready.length) return; // The answer's original clickable links remain available.
+  const ready = await Promise.all(pictures.map(async picture => {
+    const [image, code] = await Promise.allSettled([fetchDeckPicture(picture, fetcher), publishDeckCode(picture.deckUrl, picture.cards, fetcher)]);
+    return { ...picture, blob: image.status === 'fulfilled' ? image.value : null,
+      code: code.status === 'fulfilled' && code.value.status === 'ok' ? code.value.code : null };
+  }));
+  const attached = ready.filter(p => p.blob);
   const form = new FormData();
-  const payload = { content: ready.map((p, i) => `${i + 1}. ${p.label}：[牌表](<${p.deckUrl}>)`).join('\n'),
+  const payload = { content: ready.map((p, i) => `${i + 1}. ${p.label}\n${p.code ? `牌組代碼：\`${p.code}\`` : '暫時無法取得牌組代碼，可從官方牌表重新發行。'}\n[官方牌表](<${p.deckUrl}>)${p.blob ? '' : '（牌組圖暫時無法載入）'}`).join('\n\n') +
+      (ready.some(p => p.code) ? '\n\n代碼可能失效；若無法匯入，請開啟官方牌表重新發行。' : ''),
     allowed_mentions: { parse: [], replied_user: false }, flags: 4,
     nonce: await messageNonce(`${input.id}:deck-pictures`), enforce_nonce: true,
     message_reference: { message_id: input.id, fail_if_not_exists: false },
-    attachments: ready.map((p,i) => ({ id: i, filename: `deck-${i + 1}.png`, description: `${p.label}繁中牌組圖片` })),
+    attachments: attached.map((p,i) => ({ id: i, filename: `deck-${i + 1}.png`, description: `${p.label}繁中牌組圖片` })),
   };
   form.set('payload_json', JSON.stringify(payload));
-  ready.forEach((p,i) => form.set(`files[${i}]`, p.blob, `deck-${i + 1}.png`));
-  await discord(env, `/channels/${input.channelId}/messages`, 'POST', form);
+  attached.forEach((p,i) => form.set(`files[${i}]`, p.blob, `deck-${i + 1}.png`));
+  await discord(env, `/channels/${input.channelId}/messages`, 'POST', attached.length ? form : payload);
 }

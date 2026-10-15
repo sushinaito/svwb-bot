@@ -101,7 +101,7 @@ export async function metaContext(text, fetcher = fetch, diagnose = () => {}, re
         ...(includeCards ? { cards: (deck.cards || []).slice(0, 60).map(entry => {
           const card = cardData[entry.cardId];
           if (!card || !Number.isInteger(entry.count) || entry.count < 1 || entry.count > 3) throw Error('Invalid card');
-          return { name: plain(card.names?.['zh-Hant'] || '繁中卡名尚未確認', 100), nameJapanese: plain(card.names?.ja, 100), quantity: entry.count,
+          return { id: String(entry.cardId), name: plain(card.names?.['zh-Hant'] || '繁中卡名尚未確認', 100), nameJapanese: plain(card.names?.ja, 100), quantity: entry.count,
             cost: card.cost, text: plain(card.skill?.['zh-Hant']) };
         }) } : {}),
       })),
