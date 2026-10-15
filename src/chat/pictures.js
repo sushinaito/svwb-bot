@@ -17,7 +17,7 @@ export function deckPictures(input, answer) {
     if (imageUrl && !pictures.has(imageUrl)) pictures.set(imageUrl, { imageUrl, deckUrl: url, label });
   };
   for (const archetype of input.meta?.archetypes || []) for (const deck of archetype.decks || []) {
-    if (answer.includes(archetype.name) || answer.includes(deck.deckUrl)) add(deck.deckUrl, `${input.meta.className}・${archetype.name}`);
+    if (answer.includes(archetype.name) || answer.includes(deck.deckUrl)) add(deck.deckUrl, `${archetype.className || input.meta.className || '牌組'}・${archetype.name}`);
   }
   for (const match of answer.matchAll(/https:\/\/shadowverse-wb\.com\/[^\s<>\])]+/g)) add(match[0], '牌組');
   return [...pictures.values()].slice(0, 2);

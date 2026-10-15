@@ -30,6 +30,13 @@ original `wrangler.toml` to deploy this feature.
   text links.
 - Web search/fetch are available. Private saved decks and deck database tools are
   not connected to Claude; the existing slash commands continue to handle them.
+- Broad questions about popular decks or the current meta load all seven classes
+  without requiring a class name. Cross-class percentages use all sampled builds;
+  within-class percentages keep their own denominator. Competition questions also
+  load the latest listed tournament within the source's date window, filtering by
+  organizer when named. Tournament percentages include unclassified deck slots in
+  the denominator. Missing tournament data does not discard the community sample;
+  neither dataset claims to measure global ranked-ladder usage.
 - Natural requests such as `@電競魅魔 幫我看看這副牌：y8hf` automatically look up
   up to two four-character deck codes through the official Portal in Traditional
   Chinese. The model receives card counts, costs, base/evolved effects and a source

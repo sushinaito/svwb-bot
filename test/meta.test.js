@@ -47,3 +47,83 @@ test('Cloudflare-compatible redirect handling rejects redirects without followin
   assert.equal(result.status, 'unavailable');
   assert.equal(diagnostic.message, 'Source HTTP 302');
 });
+
+function overviewFixture(change = {}) {
+  const keys = ['Elf','Royal','Witch','Dragon','Nightmare','Bishop','Nemesis'];
+  const groups = keys.map(key => ({ class: key, total: key === 'Royal' ? 30 : key === 'Dragon' ? 20 : 10,
+    archetypes: [{ id: key, name: key, builds: key === 'Royal' ? 30 : key === 'Dragon' ? 20 : 10, pct: 100 }] }));
+  const event = { slug: 'latest', name: 'BCL Weekly', org: 'BCL', format: 'rotation', startDate: '2026-10-11', endDate: '2026-10-11', playerCount: 5, deckCount: 10 };
+  const fixtures = {
+    '/api/manifest': { files: { 'deck.rotation.14': 'summary.json', archetypes: 'labels.json', tournaments: 'events.json',
+      'tournament.latest': 'event.json', ...Object.fromEntries(keys.map(k => [`archdeck.rotation.${k}`, `${k}.json`])) } },
+    '/data/summary.json': { window: { from: '2026-10-01', to: '2026-10-14' }, classes: groups },
+    '/data/labels.json': { Royal: { 'zh-Hant': '海賊皇家' }, Dragon: { 'zh-Hant': '跳費龍' }, Elf: { 'zh-Hant': '連擊精靈' } },
+    '/data/events.json': [{ ...event, slug: 'old', endDate: '2026-08-01' }, event, { ...event, slug: 'future', endDate: '2026-10-30' }],
+    '/data/event.json': { tournament: event, archetypes: [{ name: 'Royal', class: 'Royal', count: 3, pct: 999 },
+      { name: 'Elf', class: 'Elf', count: 5 }, { name: null, class: null, count: 2 }] },
+    ...Object.fromEntries(keys.map(k => [`/data/${k}.json`, { decks: [{ deckUrl: `https://shadowverse-wb.com/ja/deck/detail/?hash=1.2.aaaa` }] }])),
+    ...change,
+  };
+  const calls = [];
+  return { fixtures, calls, fetcher: async raw => {
+    const path = new URL(raw).pathname; calls.push(path);
+    if (!(path in fixtures) || fixtures[path] === null) return new Response(null, { status: 503 });
+    return Response.json(fixtures[path]);
+  } };
+}
+
+test('screenshot question loads all classes and a dated tournament with distinct denominators', async () => {
+  const f = overviewFixture();
+  const result = await metaContext('現在比賽和排位最多人用的牌組是？', f.fetcher);
+  assert.equal(result.status, 'ok'); assert.equal(result.scope, 'all_classes');
+  assert.equal(result.classes.length, 7); assert.equal(result.sampledBuilds, 100);
+  assert.equal(result.archetypes[0].name, '海賊皇家');
+  assert.equal(result.archetypes[0].shareOfAllSampledBuildsPct, 30);
+  assert.equal(result.archetypes[0].shareWithinClassPct, 100);
+  assert.equal(result.tournament.status, 'ok');
+  assert.equal(result.tournament.endDate, '2026-10-11');
+  assert.equal(result.tournament.archetypes[0].name, '連擊精靈');
+  assert.equal(result.tournament.archetypes[0].shareOfSubmittedDecksPct, 50);
+  assert.equal(result.tournament.unknownArchetypeDecks, 2);
+  assert.equal(result.tournament.archetypes[1].shareOfSubmittedDecksPct, 30, 'Recompute from counts, ignoring inconsistent source pct');
+  assert.equal(result.rankedLadder.status, 'population_usage_unavailable');
+  assert.ok(!f.calls.some(p => /cards|rankings/.test(p)), 'Do not load irrelevant large data');
+  assert.match(userEvent({ text: '最多人用的牌組', meta: result }).content[0].text, /不要要求先指定職業/);
+});
+
+test('specific SCL questions never substitute another organizer or stale tournament', async () => {
+  const f = overviewFixture();
+  const result = await metaContext('最新 SCL 比賽最多人用的牌組', f.fetcher);
+  assert.equal(result.status, 'ok'); assert.equal(result.tournament.status, 'unavailable');
+  assert.ok(!f.calls.includes('/data/event.json'));
+  f.fixtures['/data/events.json'] = [{ ...f.fixtures['/data/events.json'][1], endDate: '2026-09-20' }];
+  const old = await metaContext('現在比賽主流牌組', f.fetcher);
+  assert.equal(old.tournament.status, 'unavailable');
+});
+
+test('optional tournament and example-deck failures preserve the complete community overview', async () => {
+  const f = overviewFixture({ '/data/event.json': null, '/data/Royal.json': null });
+  const result = await metaContext('現在比賽和排位最多人用的牌組是？', f.fetcher);
+  assert.equal(result.status, 'ok'); assert.equal(result.sampledBuilds, 100);
+  assert.equal(result.tournament.status, 'unavailable'); assert.deepEqual(result.archetypes[0].decks, []);
+});
+
+test('incomplete class sets and invalid counts cannot masquerade as all-class usage', async () => {
+  for (const mutate of [f => f['/data/summary.json'].classes.pop(), f => f['/data/summary.json'].classes[0].total = -1,
+    f => f['/data/summary.json'].classes[0].archetypes[0].builds = 11]) {
+    const fixture = overviewFixture(); mutate(fixture.fixtures);
+    assert.equal((await metaContext('目前主流牌組', fixture.fetcher)).status, 'unavailable');
+  }
+  const f = overviewFixture(); f.fixtures['/data/event.json'].archetypes.pop();
+  const result = await metaContext('比賽熱門牌組', f.fetcher);
+  assert.equal(result.status, 'ok'); assert.equal(result.tournament.status, 'unavailable');
+});
+
+test('cross-class and general meta phrasing route without affecting ordinary deck analysis', async () => {
+  for (const text of ['現在主流是什麼？', '推薦牌組', '最新 meta', '全職業最強牌組', '比較龍族和皇家牌組']) {
+    const f = overviewFixture();
+    const result = await metaContext(text, f.fetcher);
+    assert.equal(result?.scope, 'all_classes', text);
+  }
+  assert.equal(await metaContext('幫我分析我的牌組 y8hf', () => { throw Error('Should not fetch'); }), null);
+});

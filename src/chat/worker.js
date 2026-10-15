@@ -17,13 +17,17 @@ export default {
     if (path.endsWith('/source-health')) {
       let diagnostic;
       const result = await metaContext('最近最強的龍族牌組有啥', fetch, d => { diagnostic = d; });
+      const overview = await metaContext('現在比賽和排位最多人用的牌組是？');
       const picture = deckPictures({ meta: result }, result.archetypes?.[0]?.name || '')[0];
       let image = { status: 'unavailable' };
       if (picture) {
         try { const blob = await fetchDeckPicture(picture); image = { status: 'ok', type: blob.type, bytes: blob.size }; }
         catch { image = { status: 'unavailable' }; }
       }
-      return json({ status: result.status, diagnostic, window: result.window, archetypes: result.archetypes?.map(a => a.name), image });
+      return json({ status: result.status, diagnostic, window: result.window, archetypes: result.archetypes?.map(a => a.name), image,
+        overview: { status: overview?.status, scope: overview?.scope, sampledBuilds: overview?.sampledBuilds,
+          classCount: overview?.classes?.length, topArchetypes: overview?.archetypes?.slice(0, 3).map(a => ({ name: a.name, sampledBuilds: a.sampledBuilds })),
+          tournament: overview?.tournament } });
     }
     const response = await env.GATEWAY.getByName('discord').fetch(`https://gateway${path.replace('/admin', '')}`, { method: request.method });
     if (path.endsWith('/status')) {
